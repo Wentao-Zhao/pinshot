@@ -44,6 +44,7 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.isMovableByWindowBackground = true
     window.minSize = NSSize(width: 220, height: 160)
     window.titlebarAppearsTransparent = true
+    window.standardWindowButton(.closeButton)?.isHidden = false
 
     super.init(window: window)
     window.delegate = self
@@ -81,10 +82,10 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.contentView = frameView
 
     NSLayoutConstraint.activate([
-      imageView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 12),
-      imageView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -12),
-      imageView.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 32),
-      imageView.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -12),
+      imageView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 8),
+      imageView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -8),
+      imageView.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 26),
+      imageView.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -8),
     ])
   }
 
@@ -97,7 +98,7 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     else {
       return
     }
-    closeButton.setFrameOrigin(NSPoint(x: 22, y: max(container.bounds.height - closeButton.frame.height - 14, 8)))
+    closeButton.setFrameOrigin(NSPoint(x: 16, y: max(container.bounds.height - closeButton.frame.height - 12, 8)))
   }
 
   private static func defaultFrame(for image: NSImage, offset: CGFloat) -> NSRect {
@@ -127,22 +128,17 @@ private final class PinnedImageFrameView: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    let rect = bounds.insetBy(dx: 5, dy: 5)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 24, yRadius: 24)
+    let rect = bounds.insetBy(dx: 4, dy: 4)
+    let path = NSBezierPath(roundedRect: rect, xRadius: 20, yRadius: 20)
     let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
-    shadow.shadowBlurRadius = 18
-    shadow.shadowOffset = NSSize(width: 0, height: -4)
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.20)
+    shadow.shadowBlurRadius = 20
+    shadow.shadowOffset = NSSize(width: 0, height: -5)
 
     NSGraphicsContext.saveGraphicsState()
     shadow.set()
-    NSColor.windowBackgroundColor.withAlphaComponent(0.88).setFill()
+    NSColor.windowBackgroundColor.withAlphaComponent(0.72).setFill()
     path.fill()
     NSGraphicsContext.restoreGraphicsState()
-
-    NSColor.systemBlue.withAlphaComponent(0.34).setStroke()
-    path.lineWidth = 1.2
-    path.stroke()
   }
 }
-

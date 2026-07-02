@@ -13,6 +13,10 @@ struct ScreenSnapshot {
   }
 }
 
+struct SendableCapturedImage: @unchecked Sendable {
+  let cgImage: CGImage
+}
+
 enum ScreenCaptureService {
   static func hasScreenCaptureAccess() -> Bool {
     CGPreflightScreenCaptureAccess()
@@ -36,6 +40,13 @@ enum ScreenCaptureService {
       return nil
     }
     return NSImage(cgImage: cgImage, size: size)
+  }
+
+  static func captureCGImage(displayID: CGDirectDisplayID) -> SendableCapturedImage? {
+    guard let cgImage = CGDisplayCreateImage(displayID) else {
+      return nil
+    }
+    return SendableCapturedImage(cgImage: cgImage)
   }
 
   static func syntheticSnapshot(screen: NSScreen) -> ScreenSnapshot {

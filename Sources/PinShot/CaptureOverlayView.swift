@@ -17,6 +17,7 @@ final class CaptureOverlayView: NSView {
   private var selectionRect: NSRect?
   private var interaction: Interaction = .idle
   private var selectedTool: AnnotationTool = .move
+  private var annotationStyle = AnnotationStyle.default
   private var annotations = AnnotationDocument()
   private var previewAnnotation: AnnotationItem?
   private var textField: NSTextField?
@@ -64,10 +65,10 @@ final class CaptureOverlayView: NSView {
       NSGraphicsContext.saveGraphicsState()
       NSBezierPath(rect: selectionRect).addClip()
       for item in annotations.items {
-        AnnotationDrawing.draw(item: item)
+        AnnotationDrawing.draw(item: item, baseImage: snapshot.image)
       }
       if let previewAnnotation {
-        AnnotationDrawing.draw(item: previewAnnotation)
+        AnnotationDrawing.draw(item: previewAnnotation, baseImage: snapshot.image)
       }
       NSGraphicsContext.restoreGraphicsState()
     } else {
@@ -100,21 +101,26 @@ final class CaptureOverlayView: NSView {
       return
     }
 
+    if isSelectionMoveHandle(point, in: selectionRect) {
+      interaction = .movingSelection(last: point)
+      return
+    }
+
     switch selectedTool {
     case .move:
       interaction = .movingSelection(last: point)
     case .rectangle:
       interaction = .drawing(start: point)
-      previewAnnotation = AnnotationItem(kind: .rectangle, points: [point.point2D, point.point2D])
+      previewAnnotation = AnnotationItem(kind: .rectangle, points: [point.point2D, point.point2D], style: annotationStyle)
     case .arrow:
       interaction = .drawing(start: point)
-      previewAnnotation = AnnotationItem(kind: .arrow, points: [point.point2D, point.point2D])
+      previewAnnotation = AnnotationItem(kind: .arrow, points: [point.point2D, point.point2D], style: annotationStyle)
     case .mosaic:
       interaction = .drawing(start: point)
-      previewAnnotation = AnnotationItem(kind: .mosaic, points: [point.point2D, point.point2D])
+      previewAnnotation = AnnotationItem(kind: .mosaic, points: [point.point2D, point.point2D], style: annotationStyle)
     case .pen:
       interaction = .drawingPen(points: [point.point2D])
-      previewAnnotation = AnnotationItem(kind: .pen, points: [point.point2D])
+      previewAnnotation = AnnotationItem(kind: .pen, points: [point.point2D], style: annotationStyle)
     case .text:
       beginTextEditing(at: point)
       interaction = .idle
@@ -158,7 +164,7 @@ final class CaptureOverlayView: NSView {
       setNeedsDisplay(bounds)
     case .drawingPen(var points):
       points.append(point.point2D)
-      previewAnnotation = AnnotationItem(kind: .pen, points: points)
+      previewAnnotation = AnnotationItem(kind: .pen, points: points, style: annotationStyle)
       interaction = .drawingPen(points: points)
       setNeedsDisplay(bounds)
     }
@@ -171,6 +177,7 @@ final class CaptureOverlayView: NSView {
         toolbar.isHidden = false
         selectedTool = .move
         toolbar.setSelectedTool(.move)
+        annotationStyle = toolbar.currentStyle()
         updateToolbarFrame()
       } else {
         selectionRect = nil
@@ -215,27 +222,18 @@ final class CaptureOverlayView: NSView {
     switch command {
     case .tool(let tool):
       selectedTool = tool
+    case .style(let style):
+      annotationStyle = style
     case .undo:
       _ = annotations.undo()
       setNeedsDisplay(bounds)
-    case .redo:
-      _ = annotations.redo()
+    case .reset:
+      annotations.reset()
       setNeedsDisplay(bounds)
-    case .clear:
-      annotations.clear()
-      setNeedsDisplay(bounds)
-    case .finishDefault:
-      onCommand?(.finishDefault, renderedImage())
-    case .copy:
-      onCommand?(.copy, renderedImage())
-    case .save:
-      onCommand?(.save, renderedImage())
     case .pin:
       onCommand?(.pin, renderedImage())
     case .ocr:
       onCommand?(.ocr, renderedImage())
-    case .cancel:
-      onCommand?(.cancel, nil)
     }
   }
 
@@ -246,7 +244,9 @@ final class CaptureOverlayView: NSView {
     previewAnnotation = AnnotationItem(
       id: existing.id,
       kind: existing.kind,
-      points: [start.point2D, point.point2D]
+      points: [start.point2D, point.point2D],
+      text: existing.text,
+      style: annotationStyle
     )
   }
 
@@ -255,7 +255,8 @@ final class CaptureOverlayView: NSView {
 
     let field = NSTextField(frame: NSRect(x: point.x, y: point.y - 24, width: 220, height: 28))
     field.placeholderString = "输入文字"
-    field.font = .systemFont(ofSize: 18, weight: .semibold)
+    field.font = .systemFont(ofSize: CGFloat(annotationStyle.fontSize), weight: .semibold)
+    field.textColor = annotationStyle.textColor.nsColor
     field.target = self
     field.action = #selector(commitTextField)
     addSubview(field)
@@ -274,7 +275,7 @@ final class CaptureOverlayView: NSView {
     let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     if !text.isEmpty {
       annotations.append(
-        AnnotationItem(kind: .text, points: [field.frame.origin.point2D], text: text)
+        AnnotationItem(kind: .text, points: [field.frame.origin.point2D], text: text, style: annotationStyle)
       )
     }
     field.removeFromSuperview()
@@ -301,7 +302,7 @@ final class CaptureOverlayView: NSView {
     }
 
     let size = toolbar.fittingSize
-    let width = min(max(size.width, 760), bounds.width - 24)
+    let width = min(max(size.width, 330), bounds.width - 24)
     let x = min(max(selectionRect.midX - width / 2, 12), bounds.width - width - 12)
     let yAbove = selectionRect.maxY + 10
     let yBelow = selectionRect.minY - 48
@@ -319,6 +320,13 @@ final class CaptureOverlayView: NSView {
     for handle in handleRects(for: rect) {
       NSBezierPath(ovalIn: handle).fill()
     }
+  }
+
+  private func isSelectionMoveHandle(_ point: NSPoint, in rect: NSRect) -> Bool {
+    let edgeInset: CGFloat = 10
+    let expanded = rect.insetBy(dx: -edgeInset, dy: -edgeInset)
+    let inner = rect.insetBy(dx: edgeInset, dy: edgeInset)
+    return expanded.contains(point) && !inner.contains(point)
   }
 
   private func drawHint(text: String) {
@@ -368,5 +376,16 @@ private extension NSPoint {
 private extension Rect2D {
   var nsRect: NSRect {
     NSRect(x: x, y: y, width: width, height: height)
+  }
+}
+
+private extension AnnotationColor {
+  var nsColor: NSColor {
+    NSColor(
+      calibratedRed: CGFloat(red),
+      green: CGFloat(green),
+      blue: CGFloat(blue),
+      alpha: CGFloat(alpha)
+    )
   }
 }

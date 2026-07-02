@@ -25,7 +25,12 @@ enum ScreenshotRenderer {
     NSBezierPath(rect: NSRect(origin: .zero, size: selectionRect.size)).addClip()
     let offset = NSPoint(x: -selectionRect.minX, y: -selectionRect.minY)
     for item in annotations {
-      AnnotationDrawing.draw(item: item, offset: offset)
+      AnnotationDrawing.draw(
+        item: item,
+        offset: offset,
+        baseImage: snapshotImage,
+        mosaicSourceOffset: NSPoint(x: -offset.x, y: -offset.y)
+      )
     }
     NSGraphicsContext.restoreGraphicsState()
 

@@ -43,8 +43,9 @@ final class CaptureSessionController {
 
     let size = screen.frame.size
     captureTask = Task.detached(priority: .userInitiated) {
-      let image = ScreenCaptureService.captureImage(displayID: displayID, size: size)
+      let capturedImage = ScreenCaptureService.captureCGImage(displayID: displayID)
       await MainActor.run {
+        let image = capturedImage.map { NSImage(cgImage: $0.cgImage, size: size) }
         controller.updateImage(image)
       }
     }

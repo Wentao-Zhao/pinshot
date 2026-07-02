@@ -17,22 +17,72 @@ public enum AnnotationKind: String, Codable, Equatable, Sendable {
   case mosaic
 }
 
+public struct AnnotationColor: Codable, Equatable, Sendable {
+  public var red: Double
+  public var green: Double
+  public var blue: Double
+  public var alpha: Double
+
+  public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
+    self.red = min(max(red, 0), 1)
+    self.green = min(max(green, 0), 1)
+    self.blue = min(max(blue, 0), 1)
+    self.alpha = min(max(alpha, 0), 1)
+  }
+
+  public static let red = AnnotationColor(red: 1, green: 0.18, blue: 0.16)
+  public static let blue = AnnotationColor(red: 0.12, green: 0.46, blue: 1)
+  public static let yellow = AnnotationColor(red: 1, green: 0.78, blue: 0.18)
+  public static let green = AnnotationColor(red: 0.18, green: 0.72, blue: 0.34)
+  public static let white = AnnotationColor(red: 1, green: 1, blue: 1)
+  public static let black = AnnotationColor(red: 0.08, green: 0.08, blue: 0.08)
+}
+
+public struct AnnotationStyle: Codable, Equatable, Sendable {
+  public var strokeWidth: Double
+  public var strokeColor: AnnotationColor
+  public var fontSize: Double
+  public var textColor: AnnotationColor
+
+  public static let `default` = AnnotationStyle(
+    strokeWidth: 4,
+    strokeColor: .red,
+    fontSize: 24,
+    textColor: .red
+  )
+
+  public init(
+    strokeWidth: Double,
+    strokeColor: AnnotationColor,
+    fontSize: Double,
+    textColor: AnnotationColor
+  ) {
+    self.strokeWidth = min(max(strokeWidth, 1), 16)
+    self.strokeColor = strokeColor
+    self.fontSize = min(max(fontSize, 12), 72)
+    self.textColor = textColor
+  }
+}
+
 public struct AnnotationItem: Codable, Equatable, Sendable, Identifiable {
   public var id: UUID
   public var kind: AnnotationKind
   public var points: [Point2D]
   public var text: String
+  public var style: AnnotationStyle
 
   public init(
     id: UUID = UUID(),
     kind: AnnotationKind,
     points: [Point2D],
-    text: String = ""
+    text: String = "",
+    style: AnnotationStyle = .default
   ) {
     self.id = id
     self.kind = kind
     self.points = points
     self.text = text
+    self.style = style
   }
 }
 
@@ -82,6 +132,11 @@ public struct AnnotationDocument: Codable, Equatable, Sendable {
     }
     redoStack.append(contentsOf: items.reversed())
     items.removeAll()
+  }
+
+  public mutating func reset() {
+    items.removeAll()
+    redoStack.removeAll()
   }
 
   public mutating func moveAll(dx: Double, dy: Double) {

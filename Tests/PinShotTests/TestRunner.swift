@@ -27,7 +27,9 @@ struct TestRunner {
     testShortcutMatching(recorder)
     testFileNaming(recorder)
     testSelectionGeometry(recorder)
+    testAnnotationStyleDefaults(recorder)
     testAnnotationUndoRedo(recorder)
+    testAnnotationResetDiscardsRedo(recorder)
 
     if recorder.failures.isEmpty {
       print("PASS: \(recorder.checks) checks")
@@ -108,5 +110,29 @@ struct TestRunner {
     recorder.expect(document.items.isEmpty, "clear removes annotations")
     recorder.expect(document.canRedo, "clear keeps redo data")
   }
-}
 
+  private static func testAnnotationStyleDefaults(_ recorder: TestRecorder) {
+    let style = AnnotationStyle.default
+    recorder.expect(style.strokeWidth == 4, "default stroke width is visible")
+    recorder.expect(style.strokeColor == .red, "default stroke color is red")
+    recorder.expect(style.fontSize == 24, "default text size is readable")
+    recorder.expect(style.textColor == .red, "default text color is red")
+
+    let customStyle = AnnotationStyle(
+      strokeWidth: 7,
+      strokeColor: .blue,
+      fontSize: 32,
+      textColor: .yellow
+    )
+    let item = AnnotationItem(kind: .arrow, points: [Point2D(x: 0, y: 0), Point2D(x: 10, y: 10)], style: customStyle)
+    recorder.expect(item.style == customStyle, "annotation item keeps captured style")
+  }
+
+  private static func testAnnotationResetDiscardsRedo(_ recorder: TestRecorder) {
+    var document = AnnotationDocument()
+    document.append(AnnotationItem(kind: .rectangle, points: [Point2D(x: 1, y: 1), Point2D(x: 4, y: 4)]))
+    document.reset()
+    recorder.expect(document.items.isEmpty, "reset removes annotations")
+    recorder.expect(!document.canRedo, "reset discards redo history")
+  }
+}

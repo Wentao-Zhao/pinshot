@@ -2,7 +2,12 @@ import AppKit
 import PinShotCore
 
 enum AnnotationDrawing {
-  static func draw(item: AnnotationItem, offset: NSPoint = .zero) {
+  static func draw(
+    item: AnnotationItem,
+    offset: NSPoint = .zero,
+    baseImage: NSImage? = nil,
+    mosaicSourceOffset: NSPoint = .zero
+  ) {
     switch item.kind {
     case .rectangle:
       drawRectangle(item, offset: offset)
@@ -13,7 +18,7 @@ enum AnnotationDrawing {
     case .text:
       drawText(item, offset: offset)
     case .mosaic:
-      drawMosaic(item, offset: offset)
+      drawMosaic(item, offset: offset, baseImage: baseImage, sourceOffset: mosaicSourceOffset)
     }
   }
 
@@ -40,8 +45,8 @@ enum AnnotationDrawing {
       return
     }
     let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-    NSColor.systemRed.setStroke()
-    path.lineWidth = 3
+    item.style.strokeColor.nsColor.setStroke()
+    path.lineWidth = CGFloat(item.style.strokeWidth)
     path.stroke()
   }
 
@@ -54,8 +59,8 @@ enum AnnotationDrawing {
     let path = NSBezierPath()
     path.move(to: start)
     path.line(to: end)
-    NSColor.systemRed.setStroke()
-    path.lineWidth = 3
+    item.style.strokeColor.nsColor.setStroke()
+    path.lineWidth = CGFloat(item.style.strokeWidth)
     path.lineCapStyle = .round
     path.stroke()
 
@@ -67,7 +72,7 @@ enum AnnotationDrawing {
     arrow.line(to: NSPoint(x: end.x - length * cos(angle - spread), y: end.y - length * sin(angle - spread)))
     arrow.move(to: end)
     arrow.line(to: NSPoint(x: end.x - length * cos(angle + spread), y: end.y - length * sin(angle + spread)))
-    arrow.lineWidth = 3
+    arrow.lineWidth = CGFloat(item.style.strokeWidth)
     arrow.lineCapStyle = .round
     arrow.stroke()
   }
@@ -81,8 +86,8 @@ enum AnnotationDrawing {
     for pointValue in item.points.dropFirst() {
       path.line(to: point(pointValue, offset: offset))
     }
-    NSColor.systemRed.setStroke()
-    path.lineWidth = 3
+    item.style.strokeColor.nsColor.setStroke()
+    path.lineWidth = CGFloat(item.style.strokeWidth)
     path.lineJoinStyle = .round
     path.lineCapStyle = .round
     path.stroke()
@@ -94,37 +99,68 @@ enum AnnotationDrawing {
     }
     let point = point(first, offset: offset)
     let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 18, weight: .semibold),
-      .foregroundColor: NSColor.systemRed,
+      .font: NSFont.systemFont(ofSize: CGFloat(item.style.fontSize), weight: .semibold),
+      .foregroundColor: item.style.textColor.nsColor,
       .backgroundColor: NSColor.white.withAlphaComponent(0.78),
     ]
     item.text.draw(at: point, withAttributes: attributes)
   }
 
-  private static func drawMosaic(_ item: AnnotationItem, offset: NSPoint) {
+  private static func drawMosaic(
+    _ item: AnnotationItem,
+    offset: NSPoint,
+    baseImage: NSImage?,
+    sourceOffset: NSPoint
+  ) {
     guard let rect = rect(from: item.points, offset: offset), rect.width > 2, rect.height > 2 else {
       return
     }
-    NSColor.black.withAlphaComponent(0.28).setFill()
-    NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
 
-    NSColor.white.withAlphaComponent(0.18).setStroke()
-    let grid = NSBezierPath()
-    let step: CGFloat = 10
-    var x = rect.minX
-    while x <= rect.maxX {
-      grid.move(to: NSPoint(x: x, y: rect.minY))
-      grid.line(to: NSPoint(x: x, y: rect.maxY))
-      x += step
+    let path = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
+    guard let baseImage else {
+      NSColor.black.withAlphaComponent(0.72).setFill()
+      path.fill()
+      return
     }
-    var y = rect.minY
-    while y <= rect.maxY {
-      grid.move(to: NSPoint(x: rect.minX, y: y))
-      grid.line(to: NSPoint(x: rect.maxX, y: y))
-      y += step
-    }
-    grid.lineWidth = 1
-    grid.stroke()
+
+    let sourceRect = rect.offsetBy(dx: sourceOffset.x, dy: sourceOffset.y)
+    let block: CGFloat = 12
+    let pixelSize = NSSize(
+      width: max(1, ceil(rect.width / block)),
+      height: max(1, ceil(rect.height / block))
+    )
+    let pixelImage = NSImage(size: pixelSize)
+    pixelImage.lockFocus()
+    baseImage.draw(
+      in: NSRect(origin: .zero, size: pixelSize),
+      from: sourceRect,
+      operation: .copy,
+      fraction: 1
+    )
+    pixelImage.unlockFocus()
+
+    NSGraphicsContext.saveGraphicsState()
+    path.addClip()
+    NSGraphicsContext.current?.imageInterpolation = .none
+    pixelImage.draw(
+      in: rect,
+      from: NSRect(origin: .zero, size: pixelSize),
+      operation: .copy,
+      fraction: 1
+    )
+    NSColor.black.withAlphaComponent(0.16).setFill()
+    path.fill()
+    NSGraphicsContext.restoreGraphicsState()
   }
 }
 
+private extension AnnotationColor {
+  var nsColor: NSColor {
+    NSColor(
+      calibratedRed: CGFloat(red),
+      green: CGFloat(green),
+      blue: CGFloat(blue),
+      alpha: CGFloat(alpha)
+    )
+  }
+}
