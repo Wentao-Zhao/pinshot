@@ -1,4 +1,5 @@
 import AppKit
+import PinShotCore
 
 enum CaptureCommand {
   case finishDefault
@@ -59,6 +60,13 @@ final class CaptureOverlayWindowController: NSWindowController {
       return
     }
     overlayView.updateImage(image)
+  }
+
+  func setOCRPanelState(_ state: OCRPanelState) {
+    guard let overlayView = window?.contentView as? CaptureOverlayView else {
+      return
+    }
+    overlayView.setOCRPanelState(state)
   }
 }
 

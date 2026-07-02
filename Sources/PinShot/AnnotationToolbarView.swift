@@ -27,8 +27,10 @@ final class AnnotationToolbarView: NSVisualEffectView {
     blendingMode = .behindWindow
     state = .active
     wantsLayer = true
-    layer?.cornerRadius = 14
+    layer?.cornerRadius = 18
     layer?.masksToBounds = true
+    layer?.borderWidth = 0.5
+    layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
     buildContent()
   }
 
@@ -52,7 +54,7 @@ final class AnnotationToolbarView: NSVisualEffectView {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .horizontal
     stack.alignment = .centerY
-    stack.spacing = 8
+    stack.spacing = 6
     addSubview(stack)
 
     configureToolboxButton()
@@ -72,8 +74,8 @@ final class AnnotationToolbarView: NSVisualEffectView {
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
       stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-      stack.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-      stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
+      stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
     ])
   }
 
@@ -121,11 +123,10 @@ final class AnnotationToolbarView: NSVisualEffectView {
   }
 
   private func separator() -> NSView {
-    let view = NSBox()
-    view.boxType = .separator
+    let view = ToolbarSeparatorView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.widthAnchor.constraint(equalToConstant: 1).isActive = true
-    view.heightAnchor.constraint(equalToConstant: 18).isActive = true
+    view.heightAnchor.constraint(equalToConstant: 20).isActive = true
     return view
   }
 
@@ -198,6 +199,7 @@ final class AnnotationToolbarView: NSVisualEffectView {
     controller.view = content
     let popover = NSPopover()
     popover.behavior = .transient
+    popover.appearance = NSAppearance(named: .vibrantDark)
     popover.contentViewController = controller
     self.popover = popover
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
@@ -236,7 +238,9 @@ private final class ToolOptionsView: NSView {
     self.style = style
     self.onToolChanged = onToolChanged
     self.onStyleChanged = onStyleChanged
-    super.init(frame: NSRect(x: 0, y: 0, width: 248, height: 132))
+    super.init(frame: NSRect(x: 0, y: 0, width: 224, height: 126))
+    wantsLayer = true
+    layer?.cornerRadius = 14
     buildContent(selectedTool: selectedTool)
   }
 
@@ -250,13 +254,13 @@ private final class ToolOptionsView: NSView {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 10
-    stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+    stack.spacing = 9
+    stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
     addSubview(stack)
 
     let toolStack = NSStackView()
     toolStack.orientation = .horizontal
-    toolStack.spacing = 10
+    toolStack.spacing = 8
     toolStack.addArrangedSubview(toolButton(.rectangle, kind: .rectangle, selectedTool: selectedTool))
     toolStack.addArrangedSubview(toolButton(.arrow, kind: .arrow, selectedTool: selectedTool))
     toolStack.addArrangedSubview(toolButton(.pen, kind: .pen, selectedTool: selectedTool))
@@ -265,7 +269,7 @@ private final class ToolOptionsView: NSView {
     widthSlider.doubleValue = style.strokeWidth
     widthSlider.target = self
     widthSlider.action = #selector(widthChanged)
-    widthSlider.widthAnchor.constraint(equalToConstant: 146).isActive = true
+    widthSlider.widthAnchor.constraint(equalToConstant: 132).isActive = true
     stack.addArrangedSubview(optionRow(title: "粗细", control: widthSlider))
 
     colorWell.color = style.strokeColor.nsColor
@@ -286,7 +290,7 @@ private final class ToolOptionsView: NSView {
     kind: ToolbarIconButton.Kind,
     selectedTool: AnnotationTool
   ) -> ToolbarIconButton {
-    let button = ToolbarIconButton(kind: kind, size: NSSize(width: 54, height: 42))
+    let button = ToolbarIconButton(kind: kind, size: NSSize(width: 48, height: 36))
     button.isSelected = tool == selectedTool
     button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
     button.target = self
@@ -338,7 +342,9 @@ private final class TextOptionsView: NSView {
   init(style: AnnotationStyle, onStyleChanged: @escaping (AnnotationStyle) -> Void) {
     self.style = style
     self.onStyleChanged = onStyleChanged
-    super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 92))
+    super.init(frame: NSRect(x: 0, y: 0, width: 218, height: 88))
+    wantsLayer = true
+    layer?.cornerRadius = 14
     buildContent()
   }
 
@@ -352,14 +358,14 @@ private final class TextOptionsView: NSView {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 10
-    stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+    stack.spacing = 9
+    stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
     addSubview(stack)
 
     sizeSlider.doubleValue = style.fontSize
     sizeSlider.target = self
     sizeSlider.action = #selector(sizeChanged)
-    sizeSlider.widthAnchor.constraint(equalToConstant: 146).isActive = true
+    sizeSlider.widthAnchor.constraint(equalToConstant: 132).isActive = true
     stack.addArrangedSubview(optionRow(title: "字号", control: sizeSlider))
 
     colorWell.color = style.textColor.nsColor
@@ -421,6 +427,13 @@ private extension AnnotationColor {
   }
 }
 
+private final class ToolbarSeparatorView: NSView {
+  override func draw(_ dirtyRect: NSRect) {
+    NSColor.white.withAlphaComponent(0.16).setFill()
+    bounds.insetBy(dx: 0, dy: 2).fill()
+  }
+}
+
 private final class ToolbarIconButton: NSButton {
   enum Kind {
     case toolbox
@@ -443,8 +456,14 @@ private final class ToolbarIconButton: NSButton {
 
   private let kind: Kind
   private let preferredSize: NSSize
+  private var trackingAreaRef: NSTrackingArea?
+  private var isHovered = false {
+    didSet {
+      needsDisplay = true
+    }
+  }
 
-  init(kind: Kind, size: NSSize = NSSize(width: 42, height: 34)) {
+  init(kind: Kind, size: NSSize = NSSize(width: 40, height: 32)) {
     self.kind = kind
     self.preferredSize = size
     super.init(frame: NSRect(origin: .zero, size: size))
@@ -467,20 +486,53 @@ private final class ToolbarIconButton: NSButton {
     preferredSize
   }
 
+  override func updateTrackingAreas() {
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let trackingArea = NSTrackingArea(
+      rect: bounds,
+      options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    addTrackingArea(trackingArea)
+    trackingAreaRef = trackingArea
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    isHovered = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    isHovered = false
+  }
+
   override func draw(_ dirtyRect: NSRect) {
     let rect = bounds.insetBy(dx: 2, dy: 2)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+    let path = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
     let pressed = isHighlighted || isSelected
-    (pressed ? NSColor.white.withAlphaComponent(0.22) : NSColor.white.withAlphaComponent(0.10)).setFill()
-    path.fill()
+    let fillAlpha: CGFloat
+    if pressed {
+      fillAlpha = 0.18
+    } else if isHovered {
+      fillAlpha = 0.08
+    } else {
+      fillAlpha = 0
+    }
+    if fillAlpha > 0 {
+      NSColor.white.withAlphaComponent(fillAlpha).setFill()
+      path.fill()
+    }
 
     if pressed {
-      NSColor.white.withAlphaComponent(0.16).setStroke()
+      NSColor.white.withAlphaComponent(0.18).setStroke()
       path.lineWidth = 1
       path.stroke()
     }
 
-    drawIcon(in: rect.insetBy(dx: 9, dy: 7), color: NSColor.white.withAlphaComponent(0.88))
+    drawIcon(in: rect.insetBy(dx: 9, dy: 7), color: NSColor.white.withAlphaComponent(pressed ? 0.95 : 0.78))
   }
 
   private func drawIcon(in rect: NSRect, color: NSColor) {

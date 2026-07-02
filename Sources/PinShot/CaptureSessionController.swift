@@ -7,6 +7,7 @@ final class CaptureSessionController {
   private let pinnedImageWindowManager: PinnedImageWindowManager
   private var overlayControllers: [CaptureOverlayWindowController] = []
   private var captureTask: Task<Void, Never>?
+  private var ocrTask: Task<Void, Never>?
 
   init(
     preferencesStore: PreferencesStore,
@@ -71,13 +72,13 @@ final class CaptureSessionController {
 
   private func makeOverlayController(snapshot: ScreenSnapshot) -> CaptureOverlayWindowController {
     let controller = CaptureOverlayWindowController(snapshot: snapshot)
-    controller.onCommand = { [weak self] command, image in
-      self?.handle(command: command, image: image)
+    controller.onCommand = { [weak self, weak controller] command, image in
+      self?.handle(command: command, image: image, source: controller)
     }
     return controller
   }
 
-  private func handle(command: CaptureCommand, image: NSImage?) {
+  private func handle(command: CaptureCommand, image: NSImage?, source: CaptureOverlayWindowController?) {
     switch command {
     case .cancel:
       endCapture()
@@ -108,11 +109,17 @@ final class CaptureSessionController {
       endCapture()
     case .ocr:
       guard let image else {
+        source?.setOCRPanelState(.result(from: nil))
         return
       }
-      Task { @MainActor in
+      ocrTask?.cancel()
+      source?.setOCRPanelState(.recognizing)
+      ocrTask = Task { @MainActor in
         let text = await ImageTextRecognizer.recognizedText(from: image)
-        OCRResultWindowController.show(text: text ?? "未识别到文字")
+        guard !Task.isCancelled else {
+          return
+        }
+        source?.setOCRPanelState(.result(from: text))
       }
     }
   }
@@ -158,6 +165,8 @@ final class CaptureSessionController {
   private func endCapture() {
     captureTask?.cancel()
     captureTask = nil
+    ocrTask?.cancel()
+    ocrTask = nil
     overlayControllers.forEach { $0.close() }
     overlayControllers.removeAll()
   }

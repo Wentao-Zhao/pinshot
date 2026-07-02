@@ -30,6 +30,7 @@ struct TestRunner {
     testAnnotationStyleDefaults(recorder)
     testAnnotationUndoRedo(recorder)
     testAnnotationResetDiscardsRedo(recorder)
+    testOCRPanelState(recorder)
 
     if recorder.failures.isEmpty {
       print("PASS: \(recorder.checks) checks")
@@ -134,5 +135,20 @@ struct TestRunner {
     document.reset()
     recorder.expect(document.items.isEmpty, "reset removes annotations")
     recorder.expect(!document.canRedo, "reset discards redo history")
+  }
+
+  private static func testOCRPanelState(_ recorder: TestRecorder) {
+    recorder.expect(OCRPanelState.recognizing.isVisible, "recognizing state is visible")
+    recorder.expect(!OCRPanelState.hidden.isVisible, "hidden state is not visible")
+
+    let empty = OCRPanelState.result(from: " \n ")
+    recorder.expect(empty.previewText == "未识别到文字", "blank OCR result uses fallback text")
+    recorder.expect(!empty.canCopy, "blank OCR result cannot be copied")
+
+    let longText = String(repeating: "识别内容", count: 20)
+    let result = OCRPanelState.result(from: longText)
+    recorder.expect(result.previewText.count <= 42, "long OCR result preview is compact")
+    recorder.expect(result.previewText.hasSuffix("…"), "long OCR result preview shows truncation")
+    recorder.expect(result.copyText == longText, "OCR result keeps full text for copying")
   }
 }

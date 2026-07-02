@@ -14,6 +14,7 @@ final class CaptureOverlayView: NSView {
 
   private var snapshot: ScreenSnapshot
   private let toolbar = AnnotationToolbarView(frame: .zero)
+  private let ocrPanel = OCRStatusPanelView(frame: .zero)
   private var selectionRect: NSRect?
   private var interaction: Interaction = .idle
   private var selectedTool: AnnotationTool = .move
@@ -21,15 +22,26 @@ final class CaptureOverlayView: NSView {
   private var annotations = AnnotationDocument()
   private var previewAnnotation: AnnotationItem?
   private var textField: NSTextField?
+  private var ocrState = OCRPanelState.hidden
 
   init(snapshot: ScreenSnapshot) {
     self.snapshot = snapshot
     super.init(frame: NSRect(origin: .zero, size: snapshot.screen.frame.size))
     wantsLayer = true
     addSubview(toolbar)
+    addSubview(ocrPanel)
     toolbar.isHidden = true
+    ocrPanel.isHidden = true
     toolbar.onCommand = { [weak self] command in
       self?.handleToolbarCommand(command)
+    }
+    ocrPanel.onCopy = { text in
+      let pasteboard = NSPasteboard.general
+      pasteboard.clearContents()
+      pasteboard.setString(text, forType: .string)
+    }
+    ocrPanel.onClose = { [weak self] in
+      self?.setOCRPanelState(.hidden)
     }
   }
 
@@ -82,6 +94,13 @@ final class CaptureOverlayView: NSView {
     setNeedsDisplay(bounds)
   }
 
+  func setOCRPanelState(_ state: OCRPanelState) {
+    ocrState = state
+    ocrPanel.update(state: state)
+    ocrPanel.isHidden = !state.isVisible
+    updateOCRPanelFrame()
+  }
+
   override func mouseDown(with event: NSEvent) {
     guard snapshot.image != nil else {
       return
@@ -91,6 +110,7 @@ final class CaptureOverlayView: NSView {
     let point = convert(event.locationInWindow, from: nil)
 
     guard let selectionRect else {
+      setOCRPanelState(.hidden)
       interaction = .selecting(start: point)
       self.selectionRect = NSRect(origin: point, size: .zero)
       setNeedsDisplay(bounds)
@@ -158,6 +178,7 @@ final class CaptureOverlayView: NSView {
       annotations.moveAll(dx: actualDX, dy: actualDY)
       interaction = .movingSelection(last: point)
       updateToolbarFrame()
+      updateOCRPanelFrame()
       setNeedsDisplay(bounds)
     case .drawing(let start):
       updatePreview(from: start, to: point)
@@ -233,7 +254,15 @@ final class CaptureOverlayView: NSView {
     case .pin:
       onCommand?(.pin, renderedImage())
     case .ocr:
-      onCommand?(.ocr, renderedImage())
+      guard ocrState != .recognizing else {
+        return
+      }
+      setOCRPanelState(.recognizing)
+      guard let image = renderedImage() else {
+        setOCRPanelState(.result(from: nil))
+        return
+      }
+      onCommand?(.ocr, image)
     }
   }
 
@@ -303,11 +332,32 @@ final class CaptureOverlayView: NSView {
 
     let size = toolbar.fittingSize
     let width = min(max(size.width, 330), bounds.width - 24)
+    let height = min(max(size.height, 42), 46)
     let x = min(max(selectionRect.midX - width / 2, 12), bounds.width - width - 12)
     let yAbove = selectionRect.maxY + 10
-    let yBelow = selectionRect.minY - 48
-    let y = yAbove + 44 < bounds.maxY ? yAbove : max(12, yBelow)
-    toolbar.frame = NSRect(x: x, y: y, width: width, height: 40)
+    let yBelow = selectionRect.minY - height - 8
+    let y = yAbove + height < bounds.maxY ? yAbove : max(12, yBelow)
+    toolbar.frame = NSRect(x: x, y: y, width: width, height: height)
+    updateOCRPanelFrame()
+  }
+
+  private func updateOCRPanelFrame() {
+    guard !ocrPanel.isHidden else {
+      return
+    }
+    let panelSize = ocrPanel.preferredSize(maxWidth: min(320, bounds.width - 24))
+    let spacing: CGFloat = 8
+    let rightX = toolbar.frame.maxX + spacing
+    let leftX = toolbar.frame.minX - panelSize.width - spacing
+    let x: CGFloat
+    if rightX + panelSize.width <= bounds.maxX - 12 {
+      x = rightX
+    } else if leftX >= 12 {
+      x = leftX
+    } else {
+      x = min(max(toolbar.frame.maxX - panelSize.width, 12), bounds.width - panelSize.width - 12)
+    }
+    ocrPanel.frame = NSRect(x: x, y: toolbar.frame.minY, width: panelSize.width, height: panelSize.height)
   }
 
   private func drawSelectionFrame(_ rect: NSRect) {
@@ -364,6 +414,124 @@ final class CaptureOverlayView: NSView {
 private extension NSSize {
   var isUsable: Bool {
     width >= 8 && height >= 8
+  }
+}
+
+private final class OCRStatusPanelView: NSVisualEffectView {
+  var onCopy: ((String) -> Void)?
+  var onClose: (() -> Void)?
+
+  private let stack = NSStackView()
+  private let spinner = NSProgressIndicator()
+  private let label = NSTextField(labelWithString: "")
+  private let copyButton = NSButton(title: "复制", target: nil, action: nil)
+  private let closeButton = NSButton(title: "×", target: nil, action: nil)
+  private var panelState = OCRPanelState.hidden
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    material = .hudWindow
+    blendingMode = .behindWindow
+    state = .active
+    wantsLayer = true
+    layer?.cornerRadius = 18
+    layer?.masksToBounds = true
+    layer?.borderWidth = 0.5
+    layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+    buildContent()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    nil
+  }
+
+  func update(state: OCRPanelState) {
+    panelState = state
+    label.stringValue = state.previewText
+    copyButton.isHidden = !state.canCopy
+    closeButton.isHidden = state == .recognizing
+    if state == .recognizing {
+      spinner.isHidden = false
+      spinner.startAnimation(nil)
+    } else {
+      spinner.stopAnimation(nil)
+      spinner.isHidden = true
+    }
+    needsLayout = true
+  }
+
+  func preferredSize(maxWidth: CGFloat) -> NSSize {
+    let labelWidth = min(max(label.intrinsicContentSize.width, 58), 190)
+    let spinnerWidth: CGFloat = panelState == .recognizing ? 20 : 0
+    let copyWidth: CGFloat = panelState.canCopy ? 52 : 0
+    let closeWidth: CGFloat = panelState == .recognizing ? 0 : 24
+    let spacing: CGFloat = 28
+    let width = min(max(spinnerWidth + labelWidth + copyWidth + closeWidth + spacing, 126), maxWidth)
+    return NSSize(width: width, height: 42)
+  }
+
+  private func buildContent() {
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .horizontal
+    stack.alignment = .centerY
+    stack.spacing = 8
+    addSubview(stack)
+
+    spinner.style = .spinning
+    spinner.controlSize = .small
+    spinner.isDisplayedWhenStopped = false
+    spinner.translatesAutoresizingMaskIntoConstraints = false
+    spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
+    spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+    label.textColor = NSColor.white.withAlphaComponent(0.84)
+    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.lineBreakMode = .byTruncatingTail
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    configureButton(copyButton)
+    copyButton.target = self
+    copyButton.action = #selector(copyClicked)
+
+    closeButton.isBordered = false
+    closeButton.font = .systemFont(ofSize: 14, weight: .bold)
+    closeButton.contentTintColor = NSColor.white.withAlphaComponent(0.58)
+    closeButton.target = self
+    closeButton.action = #selector(closeClicked)
+    closeButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
+
+    stack.addArrangedSubview(spinner)
+    stack.addArrangedSubview(label)
+    stack.addArrangedSubview(copyButton)
+    stack.addArrangedSubview(closeButton)
+
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+      stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+      copyButton.widthAnchor.constraint(equalToConstant: 46),
+    ])
+  }
+
+  private func configureButton(_ button: NSButton) {
+    button.bezelStyle = .rounded
+    button.controlSize = .small
+    button.font = .systemFont(ofSize: 11, weight: .semibold)
+  }
+
+  @objc private func copyClicked() {
+    guard let text = panelState.copyText else {
+      return
+    }
+    onCopy?(text)
+    label.stringValue = "已复制"
+    copyButton.isHidden = true
+  }
+
+  @objc private func closeClicked() {
+    onClose?()
   }
 }
 
