@@ -6,6 +6,7 @@ final class CaptureSessionController {
   private let preferencesStore: PreferencesStore
   private let pinnedImageWindowManager: PinnedImageWindowManager
   private var overlayControllers: [CaptureOverlayWindowController] = []
+  private var captureTask: Task<Void, Never>?
 
   init(
     preferencesStore: PreferencesStore,
@@ -25,20 +26,54 @@ final class CaptureSessionController {
       return
     }
 
-    let snapshots = NSScreen.screens.compactMap { ScreenCaptureService.capture(screen: $0) }
-    guard !snapshots.isEmpty else {
+    guard let screen = ScreenCaptureService.targetScreenForCapture() else {
       showError(message: "无法捕获屏幕", detail: "没有获取到可用的屏幕图像。")
       return
     }
 
-    overlayControllers = snapshots.map { snapshot in
-      let controller = CaptureOverlayWindowController(snapshot: snapshot)
-      controller.onCommand = { [weak self] command, image in
-        self?.handle(command: command, image: image)
-      }
-      return controller
+    guard let displayID = ScreenCaptureService.placeholderSnapshot(screen: screen).displayID else {
+      showError(message: "无法捕获屏幕", detail: "没有获取到当前屏幕的显示器 ID。")
+      return
     }
-    overlayControllers.forEach { $0.show() }
+
+    NSApp.activate(ignoringOtherApps: true)
+    let controller = makeOverlayController(snapshot: ScreenCaptureService.placeholderSnapshot(screen: screen))
+    overlayControllers = [controller]
+    controller.show()
+
+    let size = screen.frame.size
+    captureTask = Task.detached(priority: .userInitiated) {
+      let image = ScreenCaptureService.captureImage(displayID: displayID, size: size)
+      await MainActor.run {
+        controller.updateImage(image)
+      }
+    }
+  }
+
+  func runCaptureSmokeTest(onComplete: @escaping (Bool) -> Void) {
+    guard overlayControllers.isEmpty, let screen = NSScreen.main ?? NSScreen.screens.first else {
+      onComplete(false)
+      return
+    }
+
+    NSApp.activate(ignoringOtherApps: true)
+    let controller = makeOverlayController(snapshot: ScreenCaptureService.syntheticSnapshot(screen: screen))
+    overlayControllers = [controller]
+    controller.show()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak controller] in
+      let visible = controller?.window?.isVisible == true
+      self?.endCapture()
+      onComplete(visible)
+    }
+  }
+
+  private func makeOverlayController(snapshot: ScreenSnapshot) -> CaptureOverlayWindowController {
+    let controller = CaptureOverlayWindowController(snapshot: snapshot)
+    controller.onCommand = { [weak self] command, image in
+      self?.handle(command: command, image: image)
+    }
+    return controller
   }
 
   private func handle(command: CaptureCommand, image: NSImage?) {
@@ -120,6 +155,8 @@ final class CaptureSessionController {
   }
 
   private func endCapture() {
+    captureTask?.cancel()
+    captureTask = nil
     overlayControllers.forEach { $0.close() }
     overlayControllers.removeAll()
   }
@@ -139,4 +176,3 @@ final class CaptureSessionController {
     alert.runModal()
   }
 }
-

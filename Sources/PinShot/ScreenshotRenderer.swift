@@ -7,10 +7,14 @@ enum ScreenshotRenderer {
     selectionRect: NSRect,
     annotations: [AnnotationItem]
   ) -> NSImage {
+    guard let snapshotImage = snapshot.image else {
+      return NSImage(size: selectionRect.size)
+    }
+
     let image = NSImage(size: selectionRect.size)
     image.lockFocus()
 
-    snapshot.image.draw(
+    snapshotImage.draw(
       in: NSRect(origin: .zero, size: selectionRect.size),
       from: selectionRect,
       operation: .copy,
@@ -50,4 +54,3 @@ enum PNGWriterError: LocalizedError {
     "无法编码 PNG 图片"
   }
 }
-

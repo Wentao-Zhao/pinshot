@@ -19,7 +19,7 @@ swift build "${BUILD_ARGS[@]}" >/dev/null
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 
 rm -f "$OUTPUT_FILE"
-PINSHOT_LIFECYCLE_SMOKE_TEST=1 "$BIN_DIR/PinShot" >"$OUTPUT_FILE" 2>&1 &
+PINSHOT_SMOKE_TEST="${PINSHOT_SMOKE_TEST:-startup}" "$BIN_DIR/PinShot" >"$OUTPUT_FILE" 2>&1 &
 PID=$!
 
 for _ in {1..30}; do
@@ -34,12 +34,11 @@ if kill -0 "$PID" 2>/dev/null; then
     wait "$PID" 2>/dev/null || true
 fi
 
-if grep -q "PASS: PinShot startup smoke" "$OUTPUT_FILE"; then
+if grep -q "PASS: PinShot ${PINSHOT_SMOKE_TEST:-startup} smoke" "$OUTPUT_FILE"; then
     cat "$OUTPUT_FILE"
     exit 0
 fi
 
 cat "$OUTPUT_FILE" >&2
-echo "FAIL: PinShot startup smoke did not observe applicationDidFinishLaunching" >&2
+echo "FAIL: PinShot ${PINSHOT_SMOKE_TEST:-startup} smoke did not complete" >&2
 exit 1
-

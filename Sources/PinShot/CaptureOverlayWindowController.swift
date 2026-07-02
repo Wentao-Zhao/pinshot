@@ -47,7 +47,18 @@ final class CaptureOverlayWindowController: NSWindowController {
   }
 
   func show() {
-    window?.makeKeyAndOrderFront(nil)
+    guard let window else {
+      return
+    }
+    window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
+  }
+
+  func updateImage(_ image: NSImage?) {
+    guard let overlayView = window?.contentView as? CaptureOverlayView else {
+      return
+    }
+    overlayView.updateImage(image)
   }
 }
 
@@ -60,4 +71,3 @@ private final class CaptureOverlayPanel: NSPanel {
     true
   }
 }
-

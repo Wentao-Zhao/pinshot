@@ -23,7 +23,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
   private var captureSessionController: CaptureSessionController?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    if ProcessInfo.processInfo.environment["PINSHOT_LIFECYCLE_SMOKE_TEST"] == "1" {
+    let smokeTest = ProcessInfo.processInfo.environment["PINSHOT_SMOKE_TEST"]
+    if smokeTest == "startup" {
       statusItemController = StatusItemController(
         onShowPreferences: {},
         onQuit: {}
@@ -47,6 +48,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
       self?.captureSessionController?.beginCapture()
     }
     hotKeyMonitor?.start(shortcut: preferencesStore.configuration.shortcut)
+
+    if smokeTest == "capture" {
+      captureSessionController?.runCaptureSmokeTest { passed in
+        print(passed ? "PASS: PinShot capture smoke" : "FAIL: PinShot capture smoke")
+        NSApp.terminate(nil)
+      }
+    }
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

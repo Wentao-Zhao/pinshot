@@ -12,7 +12,7 @@ final class CaptureOverlayView: NSView {
     case drawingPen(points: [Point2D])
   }
 
-  private let snapshot: ScreenSnapshot
+  private var snapshot: ScreenSnapshot
   private let toolbar = AnnotationToolbarView(frame: .zero)
   private var selectionRect: NSRect?
   private var interaction: Interaction = .idle
@@ -46,7 +46,12 @@ final class CaptureOverlayView: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    snapshot.image.draw(in: bounds)
+    if let image = snapshot.image {
+      image.draw(in: bounds)
+    } else {
+      NSColor.black.withAlphaComponent(0.12).setFill()
+      bounds.fill()
+    }
 
     NSColor.black.withAlphaComponent(0.32).setFill()
     if let selectionRect {
@@ -67,11 +72,20 @@ final class CaptureOverlayView: NSView {
       NSGraphicsContext.restoreGraphicsState()
     } else {
       NSRect(origin: .zero, size: bounds.size).fill()
-      drawHint()
+      drawHint(text: snapshot.image == nil ? "正在准备截图..." : "拖动选择截图区域，Esc 取消")
     }
   }
 
+  func updateImage(_ image: NSImage?) {
+    snapshot.image = image
+    setNeedsDisplay(bounds)
+  }
+
   override func mouseDown(with event: NSEvent) {
+    guard snapshot.image != nil else {
+      return
+    }
+
     commitTextIfNeeded()
     let point = convert(event.locationInWindow, from: nil)
 
@@ -271,7 +285,7 @@ final class CaptureOverlayView: NSView {
 
   private func renderedImage() -> NSImage? {
     commitTextIfNeeded()
-    guard let selectionRect else {
+    guard let selectionRect, snapshot.image != nil else {
       return nil
     }
     return ScreenshotRenderer.render(
@@ -307,8 +321,7 @@ final class CaptureOverlayView: NSView {
     }
   }
 
-  private func drawHint() {
-    let text = "拖动选择截图区域，Esc 取消"
+  private func drawHint(text: String) {
     let attributes: [NSAttributedString.Key: Any] = [
       .font: NSFont.systemFont(ofSize: 18, weight: .semibold),
       .foregroundColor: NSColor.white.withAlphaComponent(0.9),
@@ -357,4 +370,3 @@ private extension Rect2D {
     NSRect(x: x, y: y, width: width, height: height)
   }
 }
-
