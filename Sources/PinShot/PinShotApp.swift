@@ -2,7 +2,19 @@ import AppKit
 
 @main
 @MainActor
-final class PinShotApp: NSObject, NSApplicationDelegate {
+enum PinShotMain {
+  private static let appDelegate = AppDelegate()
+
+  static func main() {
+    let application = NSApplication.shared
+    application.delegate = appDelegate
+    application.setActivationPolicy(.accessory)
+    application.run()
+  }
+}
+
+@MainActor
+private final class AppDelegate: NSObject, NSApplicationDelegate {
   private let preferencesStore = PreferencesStore()
   private let pinnedImageWindowManager = PinnedImageWindowManager()
   private var statusItemController: StatusItemController?
@@ -11,7 +23,15 @@ final class PinShotApp: NSObject, NSApplicationDelegate {
   private var captureSessionController: CaptureSessionController?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    NSApp.setActivationPolicy(.accessory)
+    if ProcessInfo.processInfo.environment["PINSHOT_LIFECYCLE_SMOKE_TEST"] == "1" {
+      statusItemController = StatusItemController(
+        onShowPreferences: {},
+        onQuit: {}
+      )
+      print("PASS: PinShot startup smoke")
+      NSApp.terminate(nil)
+      return
+    }
 
     captureSessionController = CaptureSessionController(
       preferencesStore: preferencesStore,
@@ -27,6 +47,14 @@ final class PinShotApp: NSObject, NSApplicationDelegate {
       self?.captureSessionController?.beginCapture()
     }
     hotKeyMonitor?.start(shortcut: preferencesStore.configuration.shortcut)
+  }
+
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    false
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    hotKeyMonitor?.stop()
   }
 
   private func showPreferences() {
@@ -45,4 +73,3 @@ final class PinShotApp: NSObject, NSApplicationDelegate {
     preferencesWindowController?.show()
   }
 }
-
