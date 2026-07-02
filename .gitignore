@@ -1,0 +1,6 @@
+.build/
+.swift-home/
+dist/
+.DS_Store
+Resources/AppIcon.iconset/
+
