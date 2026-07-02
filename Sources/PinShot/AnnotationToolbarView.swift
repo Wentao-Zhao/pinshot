@@ -684,17 +684,24 @@ private final class ToolbarIconButton: NSButton {
   private func drawPin(in rect: NSRect, color: NSColor) {
     color.setFill()
     color.setStroke()
-    let head = NSBezierPath(roundedRect: NSRect(x: rect.midX - 5, y: rect.maxY - 9, width: 10, height: 7), xRadius: 2, yRadius: 2)
-    head.fill()
+
+    let cap = NSBezierPath(roundedRect: NSRect(x: rect.midX - 6, y: rect.maxY - 7, width: 12, height: 5), xRadius: 2.5, yRadius: 2.5)
+    cap.fill()
+
     let path = NSBezierPath()
-    path.move(to: NSPoint(x: rect.midX, y: rect.maxY - 9))
-    path.line(to: NSPoint(x: rect.midX, y: rect.minY + 5))
-    path.move(to: NSPoint(x: rect.midX - 6, y: rect.midY))
-    path.line(to: NSPoint(x: rect.midX + 6, y: rect.midY))
-    path.move(to: NSPoint(x: rect.midX, y: rect.minY + 5))
-    path.line(to: NSPoint(x: rect.midX + 4, y: rect.minY))
-    path.lineWidth = 2.2
+    path.move(to: NSPoint(x: rect.midX - 4, y: rect.maxY - 8))
+    path.line(to: NSPoint(x: rect.midX - 2, y: rect.midY + 1))
+    path.line(to: NSPoint(x: rect.midX - 7, y: rect.midY - 2))
+    path.move(to: NSPoint(x: rect.midX + 4, y: rect.maxY - 8))
+    path.line(to: NSPoint(x: rect.midX + 2, y: rect.midY + 1))
+    path.line(to: NSPoint(x: rect.midX + 7, y: rect.midY - 2))
+    path.move(to: NSPoint(x: rect.midX - 7, y: rect.midY - 2))
+    path.line(to: NSPoint(x: rect.midX + 7, y: rect.midY - 2))
+    path.move(to: NSPoint(x: rect.midX, y: rect.midY - 2))
+    path.line(to: NSPoint(x: rect.midX, y: rect.minY + 1))
+    path.lineWidth = 2.0
     path.lineCapStyle = .round
+    path.lineJoinStyle = .round
     path.stroke()
   }
 

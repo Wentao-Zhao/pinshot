@@ -45,8 +45,10 @@ public enum OCRPanelState: Equatable, Sendable {
   private static func preview(for text: String) -> String {
     let compact = text
       .split(whereSeparator: \.isNewline)
-      .joined(separator: " ")
-    let limit = 40
+      .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .joined(separator: "\n")
+    let limit = 140
     guard compact.count > limit else {
       return compact
     }

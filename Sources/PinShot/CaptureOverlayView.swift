@@ -345,19 +345,29 @@ final class CaptureOverlayView: NSView {
     guard !ocrPanel.isHidden else {
       return
     }
-    let panelSize = ocrPanel.preferredSize(maxWidth: min(320, bounds.width - 24))
+    let panelSize = ocrPanel.preferredSize(maxWidth: min(520, bounds.width - 24))
     let spacing: CGFloat = 8
     let rightX = toolbar.frame.maxX + spacing
     let leftX = toolbar.frame.minX - panelSize.width - spacing
     let x: CGFloat
+    let y: CGFloat
     if rightX + panelSize.width <= bounds.maxX - 12 {
       x = rightX
+      y = toolbar.frame.minY
     } else if leftX >= 12 {
       x = leftX
+      y = toolbar.frame.minY
     } else {
       x = min(max(toolbar.frame.maxX - panelSize.width, 12), bounds.width - panelSize.width - 12)
+      let yBelow = toolbar.frame.minY - panelSize.height - spacing
+      let yAbove = toolbar.frame.maxY + spacing
+      if yBelow >= 12 {
+        y = yBelow
+      } else {
+        y = min(yAbove, bounds.maxY - panelSize.height - 12)
+      }
     }
-    ocrPanel.frame = NSRect(x: x, y: toolbar.frame.minY, width: panelSize.width, height: panelSize.height)
+    ocrPanel.frame = NSRect(x: x, y: y, width: panelSize.width, height: panelSize.height)
   }
 
   private func drawSelectionFrame(_ rect: NSRect) {
@@ -422,7 +432,9 @@ private final class OCRStatusPanelView: NSVisualEffectView {
   var onClose: (() -> Void)?
 
   private let stack = NSStackView()
+  private let contentStack = NSStackView()
   private let spinner = NSProgressIndicator()
+  private let titleLabel = NSTextField(labelWithString: "识别结果")
   private let label = NSTextField(labelWithString: "")
   private let copyButton = NSButton(title: "复制", target: nil, action: nil)
   private let closeButton = NSButton(title: "×", target: nil, action: nil)
@@ -449,6 +461,7 @@ private final class OCRStatusPanelView: NSVisualEffectView {
   func update(state: OCRPanelState) {
     panelState = state
     label.stringValue = state.previewText
+    titleLabel.isHidden = state == .recognizing
     copyButton.isHidden = !state.canCopy
     closeButton.isHidden = state == .recognizing
     if state == .recognizing {
@@ -462,20 +475,20 @@ private final class OCRStatusPanelView: NSVisualEffectView {
   }
 
   func preferredSize(maxWidth: CGFloat) -> NSSize {
-    let labelWidth = min(max(label.intrinsicContentSize.width, 58), 190)
-    let spinnerWidth: CGFloat = panelState == .recognizing ? 20 : 0
-    let copyWidth: CGFloat = panelState.canCopy ? 52 : 0
-    let closeWidth: CGFloat = panelState == .recognizing ? 0 : 24
-    let spacing: CGFloat = 28
-    let width = min(max(spinnerWidth + labelWidth + copyWidth + closeWidth + spacing, 126), maxWidth)
-    return NSSize(width: width, height: 42)
+    if panelState == .recognizing {
+      return NSSize(width: min(148, maxWidth), height: 42)
+    }
+    let textWeight = CGFloat(min(max(panelState.previewText.count, 36), 90))
+    let textWidth = min(max(textWeight * 6.8, 260), maxWidth - 92)
+    let width = min(max(textWidth + 92, 340), maxWidth)
+    return NSSize(width: width, height: panelState.canCopy ? 82 : 66)
   }
 
   private func buildContent() {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .horizontal
     stack.alignment = .centerY
-    stack.spacing = 8
+    stack.spacing = 10
     addSubview(stack)
 
     spinner.style = .spinning
@@ -485,10 +498,21 @@ private final class OCRStatusPanelView: NSVisualEffectView {
     spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
     spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
 
-    label.textColor = NSColor.white.withAlphaComponent(0.84)
+    titleLabel.textColor = NSColor.white.withAlphaComponent(0.58)
+    titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
+
+    label.textColor = NSColor.white.withAlphaComponent(0.88)
     label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.usesSingleLineMode = false
+    label.maximumNumberOfLines = 3
     label.lineBreakMode = .byTruncatingTail
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    contentStack.orientation = .vertical
+    contentStack.alignment = .leading
+    contentStack.spacing = 3
+    contentStack.addArrangedSubview(titleLabel)
+    contentStack.addArrangedSubview(label)
 
     configureButton(copyButton)
     copyButton.target = self
@@ -502,7 +526,7 @@ private final class OCRStatusPanelView: NSVisualEffectView {
     closeButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
 
     stack.addArrangedSubview(spinner)
-    stack.addArrangedSubview(label)
+    stack.addArrangedSubview(contentStack)
     stack.addArrangedSubview(copyButton)
     stack.addArrangedSubview(closeButton)
 

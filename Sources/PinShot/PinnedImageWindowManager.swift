@@ -44,7 +44,6 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.isMovableByWindowBackground = true
     window.minSize = NSSize(width: 220, height: 160)
     window.titlebarAppearsTransparent = true
-    window.standardWindowButton(.closeButton)?.isHidden = false
 
     super.init(window: window)
     window.delegate = self
@@ -71,6 +70,9 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
 
   private func buildContent(in window: NSWindow) {
     let frameView = PinnedImageFrameView()
+    frameView.onClose = { [weak window] in
+      window?.close()
+    }
     let imageView = NSImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.image = image
@@ -84,21 +86,15 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     NSLayoutConstraint.activate([
       imageView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 8),
       imageView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -8),
-      imageView.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 26),
+      imageView.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 38),
       imageView.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -8),
     ])
   }
 
   private func configureWindowControls(in window: NSWindow) {
+    window.standardWindowButton(.closeButton)?.isHidden = true
     window.standardWindowButton(.miniaturizeButton)?.isHidden = true
     window.standardWindowButton(.zoomButton)?.isHidden = true
-    guard
-      let closeButton = window.standardWindowButton(.closeButton),
-      let container = closeButton.superview
-    else {
-      return
-    }
-    closeButton.setFrameOrigin(NSPoint(x: 16, y: max(container.bounds.height - closeButton.frame.height - 12, 8)))
   }
 
   private static func defaultFrame(for image: NSImage, offset: CGFloat) -> NSRect {
@@ -123,6 +119,29 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
 }
 
 private final class PinnedImageFrameView: NSView {
+  var onClose: (() -> Void)?
+  private let closeButton = PinnedCloseButton()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    closeButton.target = self
+    closeButton.action = #selector(closeClicked)
+    closeButton.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(closeButton)
+    NSLayoutConstraint.activate([
+      closeButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+      closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 15),
+      closeButton.widthAnchor.constraint(equalToConstant: 16),
+      closeButton.heightAnchor.constraint(equalToConstant: 16),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    nil
+  }
+
   override var isOpaque: Bool {
     false
   }
@@ -140,5 +159,74 @@ private final class PinnedImageFrameView: NSView {
     NSColor.windowBackgroundColor.withAlphaComponent(0.72).setFill()
     path.fill()
     NSGraphicsContext.restoreGraphicsState()
+  }
+
+  @objc private func closeClicked() {
+    onClose?()
+  }
+}
+
+private final class PinnedCloseButton: NSButton {
+  private var trackingAreaRef: NSTrackingArea?
+  private var isHovered = false {
+    didSet {
+      needsDisplay = true
+    }
+  }
+
+  init() {
+    super.init(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
+    title = ""
+    isBordered = false
+    focusRingType = .none
+    setButtonType(.momentaryChange)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    nil
+  }
+
+  override func updateTrackingAreas() {
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let area = NSTrackingArea(
+      rect: bounds,
+      options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    addTrackingArea(area)
+    trackingAreaRef = area
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    isHovered = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    isHovered = false
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    let rect = bounds.insetBy(dx: 1, dy: 1)
+    let path = NSBezierPath(ovalIn: rect)
+    (isHighlighted ? NSColor.white.withAlphaComponent(0.58) : NSColor.white.withAlphaComponent(isHovered ? 0.42 : 0.30)).setFill()
+    path.fill()
+
+    guard isHovered || isHighlighted else {
+      return
+    }
+    NSColor.black.withAlphaComponent(0.56).setStroke()
+    let cross = NSBezierPath()
+    cross.move(to: NSPoint(x: rect.minX + 4.5, y: rect.minY + 4.5))
+    cross.line(to: NSPoint(x: rect.maxX - 4.5, y: rect.maxY - 4.5))
+    cross.move(to: NSPoint(x: rect.maxX - 4.5, y: rect.minY + 4.5))
+    cross.line(to: NSPoint(x: rect.minX + 4.5, y: rect.maxY - 4.5))
+    cross.lineWidth = 1.4
+    cross.lineCapStyle = .round
+    cross.stroke()
   }
 }
