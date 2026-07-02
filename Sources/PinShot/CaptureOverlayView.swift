@@ -107,7 +107,7 @@ final class CaptureOverlayView: NSView {
     }
 
     commitTextIfNeeded()
-    let point = convert(event.locationInWindow, from: nil)
+    let point = localPoint(from: event)
 
     guard let selectionRect else {
       setOCRPanelState(.hidden)
@@ -148,7 +148,7 @@ final class CaptureOverlayView: NSView {
   }
 
   override func mouseDragged(with event: NSEvent) {
-    let point = convert(event.locationInWindow, from: nil)
+    let point = localPoint(from: event)
 
     switch interaction {
     case .idle:
@@ -418,6 +418,21 @@ final class CaptureOverlayView: NSView {
       width: abs(end.x - start.x),
       height: abs(end.y - start.y)
     )
+  }
+
+  private func localPoint(from event: NSEvent) -> NSPoint {
+    let windowPoint = event.locationInWindow
+    let globalPoint = window?.convertPoint(toScreen: windowPoint) ?? windowPoint
+    let mapped = ScreenCoordinateMapper.localPoint(
+      fromGlobal: Point2D(x: globalPoint.x, y: globalPoint.y),
+      inScreenFrame: Rect2D(
+        x: snapshot.screen.frame.minX,
+        y: snapshot.screen.frame.minY,
+        width: snapshot.screen.frame.width,
+        height: snapshot.screen.frame.height
+      )
+    )
+    return NSPoint(x: mapped.x, y: mapped.y)
   }
 }
 

@@ -36,6 +36,7 @@ final class CaptureOverlayWindowController: NSWindowController {
 
     super.init(window: panel)
     let overlayView = CaptureOverlayView(snapshot: snapshot)
+    overlayView.autoresizingMask = [.width, .height]
     overlayView.onCommand = { [weak self] command, image in
       self?.onCommand?(command, image)
     }
@@ -51,6 +52,8 @@ final class CaptureOverlayWindowController: NSWindowController {
     guard let window else {
       return
     }
+    window.setFrame(snapshot.screen.frame, display: false)
+    window.contentView?.frame = NSRect(origin: .zero, size: snapshot.screen.frame.size)
     window.makeKeyAndOrderFront(nil)
     window.orderFrontRegardless()
   }

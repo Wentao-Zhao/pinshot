@@ -27,6 +27,7 @@ struct TestRunner {
     testShortcutMatching(recorder)
     testFileNaming(recorder)
     testSelectionGeometry(recorder)
+    testScreenCoordinateMapping(recorder)
     testAnnotationStyleDefaults(recorder)
     testAnnotationUndoRedo(recorder)
     testAnnotationResetDiscardsRedo(recorder)
@@ -93,6 +94,21 @@ struct TestRunner {
       constrainedTo: Rect2D(x: 0, y: 0, width: 120, height: 90)
     )
     recorder.expect(moved == Rect2D(x: 90, y: 0, width: 30, height: 40), "moving selection clamps to bounds")
+  }
+
+  private static func testScreenCoordinateMapping(_ recorder: TestRecorder) {
+    let secondaryFrame = Rect2D(x: -1920, y: 120, width: 1920, height: 1080)
+    let globalPoint = Point2D(x: -1810, y: 350)
+    recorder.expect(
+      ScreenCoordinateMapper.localPoint(fromGlobal: globalPoint, inScreenFrame: secondaryFrame) == Point2D(x: 110, y: 230),
+      "secondary screen global point maps to local overlay coordinates"
+    )
+
+    let mainFrame = Rect2D(x: 0, y: 0, width: 1512, height: 982)
+    recorder.expect(
+      ScreenCoordinateMapper.localBounds(forScreenFrame: mainFrame) == Rect2D(x: 0, y: 0, width: 1512, height: 982),
+      "screen local bounds always start at zero"
+    )
   }
 
   private static func testAnnotationUndoRedo(_ recorder: TestRecorder) {

@@ -39,6 +39,7 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     window.backgroundColor = .clear
     window.isOpaque = false
+    window.hasShadow = false
     window.isReleasedWhenClosed = false
     window.hidesOnDeactivate = false
     window.isMovableByWindowBackground = true
@@ -149,16 +150,12 @@ private final class PinnedImageFrameView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     let rect = bounds.insetBy(dx: 4, dy: 4)
     let path = NSBezierPath(roundedRect: rect, xRadius: 20, yRadius: 20)
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.20)
-    shadow.shadowBlurRadius = 20
-    shadow.shadowOffset = NSSize(width: 0, height: -5)
-
-    NSGraphicsContext.saveGraphicsState()
-    shadow.set()
-    NSColor.windowBackgroundColor.withAlphaComponent(0.72).setFill()
+    NSColor.windowBackgroundColor.withAlphaComponent(0.18).setFill()
     path.fill()
-    NSGraphicsContext.restoreGraphicsState()
+
+    NSColor.white.withAlphaComponent(0.18).setStroke()
+    path.lineWidth = 0.8
+    path.stroke()
   }
 
   @objc private func closeClicked() {
