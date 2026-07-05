@@ -139,6 +139,41 @@ public struct AnnotationDocument: Codable, Equatable, Sendable {
     redoStack.removeAll()
   }
 
+  public func item(id: UUID) -> AnnotationItem? {
+    items.first { $0.id == id }
+  }
+
+  @discardableResult
+  public mutating func move(id: UUID, dx: Double, dy: Double) -> Bool {
+    guard dx != 0 || dy != 0, let index = items.firstIndex(where: { $0.id == id }) else {
+      return false
+    }
+    items[index].points = items[index].points.map { point in
+      Point2D(x: point.x + dx, y: point.y + dy)
+    }
+    redoStack.removeAll()
+    return true
+  }
+
+  @discardableResult
+  public mutating func replace(_ item: AnnotationItem) -> Bool {
+    guard let index = items.firstIndex(where: { $0.id == item.id }) else {
+      return false
+    }
+    items[index] = item
+    redoStack.removeAll()
+    return true
+  }
+
+  @discardableResult
+  public mutating func remove(id: UUID) -> AnnotationItem? {
+    guard let index = items.firstIndex(where: { $0.id == id }) else {
+      return nil
+    }
+    redoStack.removeAll()
+    return items.remove(at: index)
+  }
+
   public mutating func moveAll(dx: Double, dy: Double) {
     guard dx != 0 || dy != 0 else {
       return

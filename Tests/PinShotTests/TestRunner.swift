@@ -31,6 +31,9 @@ struct TestRunner {
     testAnnotationStyleDefaults(recorder)
     testAnnotationUndoRedo(recorder)
     testAnnotationResetDiscardsRedo(recorder)
+    testAnnotationHitTesting(recorder)
+    testAnnotationItemEditing(recorder)
+    testTextAnnotationSession(recorder)
     testOCRPanelState(recorder)
 
     if recorder.failures.isEmpty {
@@ -151,6 +154,90 @@ struct TestRunner {
     document.reset()
     recorder.expect(document.items.isEmpty, "reset removes annotations")
     recorder.expect(!document.canRedo, "reset discards redo history")
+  }
+
+  private static func testAnnotationHitTesting(_ recorder: TestRecorder) {
+    let rectangle = AnnotationItem(
+      kind: .rectangle,
+      points: [Point2D(x: 10, y: 10), Point2D(x: 80, y: 70)]
+    )
+    let arrow = AnnotationItem(
+      kind: .arrow,
+      points: [Point2D(x: 20, y: 20), Point2D(x: 100, y: 100)]
+    )
+    let text = AnnotationItem(
+      kind: .text,
+      points: [Point2D(x: 30, y: 30)],
+      text: "editable"
+    )
+    let textBounds = [text.id: Rect2D(x: 30, y: 30, width: 90, height: 30)]
+
+    recorder.expect(
+      AnnotationHitTester.contains(Point2D(x: 12, y: 40), item: rectangle),
+      "rectangle hit testing includes its visible border"
+    )
+    recorder.expect(
+      !AnnotationHitTester.contains(Point2D(x: 40, y: 40), item: rectangle),
+      "rectangle hit testing leaves its empty interior available"
+    )
+    recorder.expect(
+      AnnotationHitTester.contains(Point2D(x: 55, y: 58), item: arrow),
+      "arrow hit testing accepts points near its line"
+    )
+    recorder.expect(
+      !AnnotationHitTester.contains(Point2D(x: 25, y: 90), item: arrow),
+      "arrow hit testing rejects empty space inside its bounding box"
+    )
+    recorder.expect(
+      AnnotationHitTester.topmostItemID(
+        at: Point2D(x: 32, y: 32),
+        in: [rectangle, text],
+        textBounds: textBounds
+      ) == text.id,
+      "hit testing prefers the last drawn annotation"
+    )
+    recorder.expect(
+      AnnotationHitTester.topmostItemID(
+        at: Point2D(x: 32, y: 32),
+        in: [rectangle, text],
+        kinds: [.text],
+        textBounds: textBounds
+      ) == text.id,
+      "hit testing can restrict matches to text annotations"
+    )
+  }
+
+  private static func testAnnotationItemEditing(_ recorder: TestRecorder) {
+    let first = AnnotationItem(kind: .rectangle, points: [Point2D(x: 1, y: 1), Point2D(x: 4, y: 4)])
+    let text = AnnotationItem(kind: .text, points: [Point2D(x: 10, y: 10)], text: "old")
+    var document = AnnotationDocument(items: [first, text])
+
+    recorder.expect(document.move(id: first.id, dx: 5, dy: 7), "an existing annotation can be moved")
+    recorder.expect(document.items[0].points[0] == Point2D(x: 6, y: 8), "moving updates only the target annotation")
+    recorder.expect(document.items[1] == text, "moving one annotation leaves the others unchanged")
+
+    var editedText = text
+    editedText.text = "new"
+    recorder.expect(document.replace(editedText), "an existing text annotation can be replaced")
+    recorder.expect(document.items[1] == editedText, "text replacement preserves its drawing order")
+    recorder.expect(document.remove(id: editedText.id) == editedText, "an emptied text annotation can be removed")
+  }
+
+  private static func testTextAnnotationSession(_ recorder: TestRecorder) {
+    var session = TextAnnotationSession()
+    recorder.expect(session.phase == .inactive, "text editing starts inactive")
+    recorder.expect(!session.usesTextCursor, "inactive text editing uses the normal cursor")
+
+    session.activate()
+    recorder.expect(session.phase == .armed, "selecting the text tool arms one text annotation")
+    recorder.expect(session.usesTextCursor, "armed text editing uses the text cursor")
+    recorder.expect(session.beginEditing(), "the first canvas click starts text editing")
+    recorder.expect(session.phase == .editing, "text editing records an active field")
+    recorder.expect(!session.beginEditing(), "an active text field cannot create another field")
+
+    session.finish()
+    recorder.expect(session.phase == .inactive, "committing text exits text editing mode")
+    recorder.expect(!session.usesTextCursor, "committing text restores the normal cursor")
   }
 
   private static func testOCRPanelState(_ recorder: TestRecorder) {

@@ -8,6 +8,7 @@ final class CaptureOverlayView: NSView {
     case idle
     case selecting(start: NSPoint)
     case movingSelection(last: NSPoint)
+    case movingAnnotation(id: UUID, last: NSPoint)
     case drawing(start: NSPoint)
     case drawingPen(points: [Point2D])
   }
@@ -22,6 +23,8 @@ final class CaptureOverlayView: NSView {
   private var annotations = AnnotationDocument()
   private var previewAnnotation: AnnotationItem?
   private var textField: NSTextField?
+  private var editingTextItem: AnnotationItem?
+  private var textSession = TextAnnotationSession()
   private var ocrState = OCRPanelState.hidden
 
   init(snapshot: ScreenSnapshot) {
@@ -58,6 +61,14 @@ final class CaptureOverlayView: NSView {
     window?.makeFirstResponder(self)
   }
 
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    guard textSession.usesTextCursor, let selectionRect else {
+      return
+    }
+    addCursorRect(selectionRect, cursor: .iBeam)
+  }
+
   override func draw(_ dirtyRect: NSRect) {
     if let image = snapshot.image {
       image.draw(in: bounds)
@@ -76,7 +87,7 @@ final class CaptureOverlayView: NSView {
 
       NSGraphicsContext.saveGraphicsState()
       NSBezierPath(rect: selectionRect).addClip()
-      for item in annotations.items {
+      for item in annotations.items where item.id != editingTextItem?.id {
         AnnotationDrawing.draw(item: item, baseImage: snapshot.image)
       }
       if let previewAnnotation {
@@ -106,7 +117,10 @@ final class CaptureOverlayView: NSView {
       return
     }
 
-    commitTextIfNeeded()
+    if textField != nil {
+      commitTextIfNeeded()
+      return
+    }
     let point = localPoint(from: event)
 
     guard let selectionRect else {
@@ -121,14 +135,23 @@ final class CaptureOverlayView: NSView {
       return
     }
 
-    if isSelectionMoveHandle(point, in: selectionRect) {
-      interaction = .movingSelection(last: point)
+    if selectedTool == .text {
+      guard textSession.beginEditing() else {
+        return
+      }
+      let existingText = hitAnnotation(at: point, kinds: [.text]).flatMap { annotations.item(id: $0) }
+      beginTextEditing(at: point, existing: existingText)
+      interaction = .idle
       return
     }
 
     switch selectedTool {
     case .move:
-      interaction = .movingSelection(last: point)
+      if let itemID = hitAnnotation(at: point) {
+        interaction = .movingAnnotation(id: itemID, last: point)
+      } else {
+        interaction = .movingSelection(last: point)
+      }
     case .rectangle:
       interaction = .drawing(start: point)
       previewAnnotation = AnnotationItem(kind: .rectangle, points: [point.point2D, point.point2D], style: annotationStyle)
@@ -142,8 +165,7 @@ final class CaptureOverlayView: NSView {
       interaction = .drawingPen(points: [point.point2D])
       previewAnnotation = AnnotationItem(kind: .pen, points: [point.point2D], style: annotationStyle)
     case .text:
-      beginTextEditing(at: point)
-      interaction = .idle
+      break
     }
   }
 
@@ -180,6 +202,12 @@ final class CaptureOverlayView: NSView {
       updateToolbarFrame()
       updateOCRPanelFrame()
       setNeedsDisplay(bounds)
+    case .movingAnnotation(let id, let last):
+      let dx = point.x - last.x
+      let dy = point.y - last.y
+      _ = annotations.move(id: id, dx: dx, dy: dy)
+      interaction = .movingAnnotation(id: id, last: point)
+      setNeedsDisplay(bounds)
     case .drawing(let start):
       updatePreview(from: start, to: point)
       setNeedsDisplay(bounds)
@@ -197,6 +225,7 @@ final class CaptureOverlayView: NSView {
       if selectionRect?.size.isUsable == true {
         toolbar.isHidden = false
         selectedTool = .move
+        textSession.finish()
         toolbar.setSelectedTool(.move)
         annotationStyle = toolbar.currentStyle()
         updateToolbarFrame()
@@ -208,11 +237,12 @@ final class CaptureOverlayView: NSView {
         annotations.append(previewAnnotation)
       }
       previewAnnotation = nil
-    case .idle, .movingSelection:
+    case .idle, .movingSelection, .movingAnnotation:
       break
     }
 
     interaction = .idle
+    window?.invalidateCursorRects(for: self)
     setNeedsDisplay(bounds)
   }
 
@@ -242,7 +272,14 @@ final class CaptureOverlayView: NSView {
   private func handleToolbarCommand(_ command: AnnotationToolbarCommand) {
     switch command {
     case .tool(let tool):
+      commitTextIfNeeded(exitTextMode: false)
       selectedTool = tool
+      if tool == .text {
+        textSession.activate()
+      } else {
+        textSession.finish()
+      }
+      window?.invalidateCursorRects(for: self)
     case .style(let style):
       annotationStyle = style
     case .undo:
@@ -279,38 +316,105 @@ final class CaptureOverlayView: NSView {
     )
   }
 
-  private func beginTextEditing(at point: NSPoint) {
+  private func beginTextEditing(at point: NSPoint, existing: AnnotationItem? = nil) {
     textField?.removeFromSuperview()
 
-    let field = NSTextField(frame: NSRect(x: point.x, y: point.y - 24, width: 220, height: 28))
-    field.placeholderString = "输入文字"
-    field.font = .systemFont(ofSize: CGFloat(annotationStyle.fontSize), weight: .semibold)
-    field.textColor = annotationStyle.textColor.nsColor
+    let style = existing?.style ?? annotationStyle
+    let origin = existing?.points.first.map { NSPoint(x: $0.x, y: $0.y) }
+      ?? NSPoint(x: point.x, y: point.y - CGFloat(style.fontSize))
+    let existingWidth = existing.map { textBounds(for: $0).width } ?? 0
+    let fieldWidth = max(220, existingWidth + 20)
+    let fieldHeight = max(28, CGFloat(style.fontSize) + 8)
+    let field = NSTextField(frame: NSRect(x: origin.x, y: origin.y, width: fieldWidth, height: fieldHeight))
+    field.placeholderString = existing == nil ? "输入文字" : nil
+    field.stringValue = existing?.text ?? ""
+    field.font = .systemFont(ofSize: CGFloat(style.fontSize), weight: .semibold)
+    field.textColor = style.textColor.nsColor
+    field.isBezeled = false
+    field.isBordered = false
+    field.drawsBackground = false
+    field.backgroundColor = .clear
+    field.focusRingType = .none
     field.target = self
     field.action = #selector(commitTextField)
     addSubview(field)
+    editingTextItem = existing
     textField = field
     window?.makeFirstResponder(field)
+    if let editor = field.currentEditor() {
+      editor.selectedRange = NSRange(location: field.stringValue.utf16.count, length: 0)
+    }
   }
 
   @objc private func commitTextField() {
     commitTextIfNeeded()
   }
 
-  private func commitTextIfNeeded() {
+  private func commitTextIfNeeded(exitTextMode: Bool = true) {
     guard let field = textField else {
       return
     }
     let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    let existing = editingTextItem
     if !text.isEmpty {
-      annotations.append(
-        AnnotationItem(kind: .text, points: [field.frame.origin.point2D], text: text, style: annotationStyle)
+      let item = AnnotationItem(
+        id: existing?.id ?? UUID(),
+        kind: .text,
+        points: [field.frame.origin.point2D],
+        text: text,
+        style: existing?.style ?? annotationStyle
       )
+      if existing == nil {
+        annotations.append(item)
+      } else {
+        _ = annotations.replace(item)
+      }
+    } else if let existing {
+      _ = annotations.remove(id: existing.id)
     }
     field.removeFromSuperview()
     textField = nil
+    editingTextItem = nil
+    if exitTextMode {
+      selectedTool = .move
+      textSession.finish()
+      toolbar.setSelectedTool(.move)
+      window?.invalidateCursorRects(for: self)
+    }
     window?.makeFirstResponder(self)
     setNeedsDisplay(bounds)
+  }
+
+  private func hitAnnotation(
+    at point: NSPoint,
+    kinds: Set<AnnotationKind>? = nil
+  ) -> UUID? {
+    let measuredTextBounds = Dictionary(
+      uniqueKeysWithValues: annotations.items.compactMap { item -> (UUID, Rect2D)? in
+        guard item.kind == .text else {
+          return nil
+        }
+        let bounds = textBounds(for: item)
+        return (item.id, Rect2D(x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height))
+      }
+    )
+    return AnnotationHitTester.topmostItemID(
+      at: point.point2D,
+      in: annotations.items,
+      kinds: kinds,
+      textBounds: measuredTextBounds
+    )
+  }
+
+  private func textBounds(for item: AnnotationItem) -> NSRect {
+    guard let origin = item.points.first else {
+      return .zero
+    }
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: CGFloat(item.style.fontSize), weight: .semibold),
+    ]
+    let size = (item.text as NSString).size(withAttributes: attributes)
+    return NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height)
   }
 
   private func renderedImage() -> NSImage? {
@@ -380,13 +484,6 @@ final class CaptureOverlayView: NSView {
     for handle in handleRects(for: rect) {
       NSBezierPath(ovalIn: handle).fill()
     }
-  }
-
-  private func isSelectionMoveHandle(_ point: NSPoint, in rect: NSRect) -> Bool {
-    let edgeInset: CGFloat = 10
-    let expanded = rect.insetBy(dx: -edgeInset, dy: -edgeInset)
-    let inner = rect.insetBy(dx: edgeInset, dy: edgeInset)
-    return expanded.contains(point) && !inner.contains(point)
   }
 
   private func drawHint(text: String) {

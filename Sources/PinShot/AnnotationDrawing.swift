@@ -101,7 +101,6 @@ enum AnnotationDrawing {
     let attributes: [NSAttributedString.Key: Any] = [
       .font: NSFont.systemFont(ofSize: CGFloat(item.style.fontSize), weight: .semibold),
       .foregroundColor: item.style.textColor.nsColor,
-      .backgroundColor: NSColor.white.withAlphaComponent(0.78),
     ]
     item.text.draw(at: point, withAttributes: attributes)
   }
