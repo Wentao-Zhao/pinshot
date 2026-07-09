@@ -29,6 +29,7 @@ struct TestRunner {
     testSelectionGeometry(recorder)
     testScreenCoordinateMapping(recorder)
     testAnnotationStyleDefaults(recorder)
+    testPrimaryDrawingTools(recorder)
     testAnnotationUndoRedo(recorder)
     testAnnotationResetDiscardsRedo(recorder)
     testAnnotationHitTesting(recorder)
@@ -146,6 +147,13 @@ struct TestRunner {
     )
     let item = AnnotationItem(kind: .arrow, points: [Point2D(x: 0, y: 0), Point2D(x: 10, y: 10)], style: customStyle)
     recorder.expect(item.style == customStyle, "annotation item keeps captured style")
+  }
+
+  private static func testPrimaryDrawingTools(_ recorder: TestRecorder) {
+    recorder.expect(
+      AnnotationTool.primaryDrawingTools == [.rectangle, .arrow, .pen],
+      "primary drawing tools stay promoted to the top-level toolbar"
+    )
   }
 
   private static func testAnnotationResetDiscardsRedo(_ recorder: TestRecorder) {

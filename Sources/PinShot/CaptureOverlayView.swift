@@ -117,6 +117,8 @@ final class CaptureOverlayView: NSView {
       return
     }
 
+    toolbar.closePopover()
+
     if textField != nil {
       commitTextIfNeeded()
       return

@@ -7,6 +7,8 @@ public enum AnnotationTool: String, CaseIterable, Codable, Equatable, Sendable {
   case pen
   case text
   case mosaic
+
+  public static let primaryDrawingTools: [AnnotationTool] = [.rectangle, .arrow, .pen]
 }
 
 public enum AnnotationKind: String, Codable, Equatable, Sendable {

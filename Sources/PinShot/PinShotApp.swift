@@ -21,6 +21,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
   private var preferencesWindowController: PreferencesWindowController?
   private var hotKeyMonitor: HotKeyMonitor?
   private var captureSessionController: CaptureSessionController?
+  private var notificationObservers: [(center: NotificationCenter, observer: NSObjectProtocol)] = []
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let smokeTest = ProcessInfo.processInfo.environment["PINSHOT_SMOKE_TEST"]
@@ -48,6 +49,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
       self?.captureSessionController?.beginCapture()
     }
     hotKeyMonitor?.start(shortcut: preferencesStore.configuration.shortcut)
+    installHotKeyRecoveryObservers()
 
     if smokeTest == "capture" {
       captureSessionController?.runCaptureSmokeTest { passed in
@@ -62,7 +64,73 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    removeHotKeyRecoveryObservers()
     hotKeyMonitor?.stop()
+  }
+
+  private func installHotKeyRecoveryObservers() {
+    let notificationCenter = NotificationCenter.default
+    notificationObservers.append((
+      notificationCenter,
+      notificationCenter.addObserver(
+        forName: NSApplication.didBecomeActiveNotification,
+        object: NSApp,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          self?.refreshHotKeyRegistration()
+        }
+      }
+    ))
+    notificationObservers.append((
+      notificationCenter,
+      notificationCenter.addObserver(
+        forName: NSApplication.didChangeScreenParametersNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          self?.refreshHotKeyRegistration()
+        }
+      }
+    ))
+
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    notificationObservers.append((
+      workspaceCenter,
+      workspaceCenter.addObserver(
+        forName: NSWorkspace.didWakeNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          self?.refreshHotKeyRegistration()
+        }
+      }
+    ))
+    notificationObservers.append((
+      workspaceCenter,
+      workspaceCenter.addObserver(
+        forName: NSWorkspace.screensDidWakeNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          self?.refreshHotKeyRegistration()
+        }
+      }
+    ))
+  }
+
+  private func removeHotKeyRecoveryObservers() {
+    for entry in notificationObservers {
+      entry.center.removeObserver(entry.observer)
+    }
+    notificationObservers.removeAll()
+  }
+
+  private func refreshHotKeyRegistration() {
+    hotKeyMonitor?.refresh()
   }
 
   private func showPreferences() {

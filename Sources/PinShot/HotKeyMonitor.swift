@@ -6,6 +6,7 @@ import PinShotCore
 final class HotKeyMonitor {
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandlerRef: EventHandlerRef?
+  private var currentShortcut: KeyboardShortcut?
   private let onTrigger: () -> Void
 
   init(onTrigger: @escaping () -> Void) {
@@ -13,6 +14,18 @@ final class HotKeyMonitor {
   }
 
   func start(shortcut: KeyboardShortcut) {
+    currentShortcut = shortcut
+    register(shortcut: shortcut, showsErrorAlert: true)
+  }
+
+  func refresh() {
+    guard let currentShortcut else {
+      return
+    }
+    register(shortcut: currentShortcut, showsErrorAlert: false)
+  }
+
+  private func register(shortcut: KeyboardShortcut, showsErrorAlert: Bool) {
     stopHotKey()
     installEventHandlerIfNeeded()
 
@@ -28,12 +41,15 @@ final class HotKeyMonitor {
 
     if status != noErr {
       hotKeyRef = nil
-      showHotKeyRegistrationError(status)
+      if showsErrorAlert {
+        showHotKeyRegistrationError(status)
+      }
     }
   }
 
   func stop() {
     stopHotKey()
+    currentShortcut = nil
     if let eventHandlerRef {
       RemoveEventHandler(eventHandlerRef)
       self.eventHandlerRef = nil
@@ -51,7 +67,7 @@ final class HotKeyMonitor {
     )
 
     let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-    InstallEventHandler(
+    let status = InstallEventHandler(
       GetApplicationEventTarget(),
       { _, _, userData in
         guard let userData else {
@@ -68,6 +84,9 @@ final class HotKeyMonitor {
       selfPointer,
       &eventHandlerRef
     )
+    if status != noErr {
+      eventHandlerRef = nil
+    }
   }
 
   private func stopHotKey() {

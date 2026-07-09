@@ -14,9 +14,12 @@ final class AnnotationToolbarView: NSVisualEffectView {
   var onCommand: ((AnnotationToolbarCommand) -> Void)?
 
   private let stack = NSStackView()
-  private let toolboxButton = ToolbarIconButton(kind: .toolbox)
+  private let rectangleButton = ToolbarIconButton(kind: .rectangle)
+  private let arrowButton = ToolbarIconButton(kind: .arrow)
+  private let penButton = ToolbarIconButton(kind: .pen)
   private let textButton = ToolbarIconButton(kind: .text)
   private let mosaicButton = ToolbarIconButton(kind: .mosaic)
+  private let styleButton = ToolbarIconButton(kind: .style)
   private var popover: NSPopover?
   private var selectedTool: AnnotationTool = .move
   private var style = AnnotationStyle.default
@@ -41,13 +44,20 @@ final class AnnotationToolbarView: NSVisualEffectView {
 
   func setSelectedTool(_ tool: AnnotationTool) {
     selectedTool = tool
-    toolboxButton.isSelected = [.rectangle, .arrow, .pen].contains(tool)
+    rectangleButton.isSelected = tool == .rectangle
+    arrowButton.isSelected = tool == .arrow
+    penButton.isSelected = tool == .pen
     textButton.isSelected = tool == .text
     mosaicButton.isSelected = tool == .mosaic
   }
 
   func currentStyle() -> AnnotationStyle {
     style
+  }
+
+  func closePopover() {
+    popover?.close()
+    popover = nil
   }
 
   private func buildContent() {
@@ -57,13 +67,19 @@ final class AnnotationToolbarView: NSVisualEffectView {
     stack.spacing = 6
     addSubview(stack)
 
-    configureToolboxButton()
+    configureDrawingButton(rectangleButton, tool: .rectangle, tooltip: "框选")
+    configureDrawingButton(arrowButton, tool: .arrow, tooltip: "箭头")
+    configureDrawingButton(penButton, tool: .pen, tooltip: "画笔")
     configureTextButton()
     configureMosaicButton()
+    configureStyleButton()
 
-    stack.addArrangedSubview(toolboxButton)
+    stack.addArrangedSubview(rectangleButton)
+    stack.addArrangedSubview(arrowButton)
+    stack.addArrangedSubview(penButton)
     stack.addArrangedSubview(textButton)
     stack.addArrangedSubview(mosaicButton)
+    stack.addArrangedSubview(styleButton)
     stack.addArrangedSubview(separator())
     addIconCommand(.undo, tooltip: "撤销")
     addIconCommand(.reset, tooltip: "重置")
@@ -79,10 +95,15 @@ final class AnnotationToolbarView: NSVisualEffectView {
     ])
   }
 
-  private func configureToolboxButton() {
-    toolboxButton.toolTip = "工具箱"
-    toolboxButton.target = self
-    toolboxButton.action = #selector(showToolboxPopover)
+  private func configureDrawingButton(
+    _ button: ToolbarIconButton,
+    tool: AnnotationTool,
+    tooltip: String
+  ) {
+    button.toolTip = tooltip
+    button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
+    button.target = self
+    button.action = #selector(toolButtonClicked(_:))
   }
 
   private func configureTextButton() {
@@ -95,6 +116,12 @@ final class AnnotationToolbarView: NSVisualEffectView {
     mosaicButton.toolTip = "马赛克"
     mosaicButton.target = self
     mosaicButton.action = #selector(selectMosaic)
+  }
+
+  private func configureStyleButton() {
+    styleButton.toolTip = "线条样式"
+    styleButton.target = self
+    styleButton.action = #selector(showLineStylePopover)
   }
 
   private func addIconCommand(
@@ -112,7 +139,7 @@ final class AnnotationToolbarView: NSVisualEffectView {
     case .ocr:
       kind = .ocr
     default:
-      kind = .toolbox
+      kind = .style
     }
     let button = ToolbarIconButton(kind: kind)
     button.toolTip = tooltip
@@ -130,15 +157,21 @@ final class AnnotationToolbarView: NSVisualEffectView {
     return view
   }
 
-  @objc private func showToolboxPopover() {
+  @objc private func toolButtonClicked(_ sender: NSButton) {
+    guard
+      let rawValue = sender.identifier?.rawValue,
+      let tool = AnnotationTool(rawValue: rawValue)
+    else {
+      return
+    }
+    select(tool)
+  }
+
+  @objc private func showLineStylePopover() {
     showPopover(
-      relativeTo: toolboxButton,
-      content: ToolOptionsView(
-        selectedTool: selectedTool,
+      relativeTo: styleButton,
+      content: LineStyleOptionsView(
         style: style,
-        onToolChanged: { [weak self] tool in
-          self?.select(tool)
-        },
         onStyleChanged: { [weak self] style in
           self?.updateStyle(style)
         }
@@ -194,7 +227,7 @@ final class AnnotationToolbarView: NSVisualEffectView {
   }
 
   private func showPopover(relativeTo button: NSView, content: NSView) {
-    popover?.close()
+    closePopover()
     let controller = NSViewController()
     controller.view = content
     let popover = NSPopover()
@@ -222,26 +255,22 @@ final class AnnotationToolbarView: NSVisualEffectView {
     }
   }
 }
-private final class ToolOptionsView: NSView {
+private final class LineStyleOptionsView: NSView {
   private var style: AnnotationStyle
-  private let onToolChanged: (AnnotationTool) -> Void
   private let onStyleChanged: (AnnotationStyle) -> Void
   private let widthSlider = NSSlider(value: 4, minValue: 1, maxValue: 12, target: nil, action: nil)
   private let colorWell = NSColorWell(frame: .zero)
 
   init(
-    selectedTool: AnnotationTool,
     style: AnnotationStyle,
-    onToolChanged: @escaping (AnnotationTool) -> Void,
     onStyleChanged: @escaping (AnnotationStyle) -> Void
   ) {
     self.style = style
-    self.onToolChanged = onToolChanged
     self.onStyleChanged = onStyleChanged
-    super.init(frame: NSRect(x: 0, y: 0, width: 224, height: 126))
+    super.init(frame: NSRect(x: 0, y: 0, width: 218, height: 88))
     wantsLayer = true
     layer?.cornerRadius = 14
-    buildContent(selectedTool: selectedTool)
+    buildContent()
   }
 
   @available(*, unavailable)
@@ -249,7 +278,7 @@ private final class ToolOptionsView: NSView {
     nil
   }
 
-  private func buildContent(selectedTool: AnnotationTool) {
+  private func buildContent() {
     let stack = NSStackView()
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
@@ -257,14 +286,6 @@ private final class ToolOptionsView: NSView {
     stack.spacing = 9
     stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
     addSubview(stack)
-
-    let toolStack = NSStackView()
-    toolStack.orientation = .horizontal
-    toolStack.spacing = 8
-    toolStack.addArrangedSubview(toolButton(.rectangle, kind: .rectangle, selectedTool: selectedTool))
-    toolStack.addArrangedSubview(toolButton(.arrow, kind: .arrow, selectedTool: selectedTool))
-    toolStack.addArrangedSubview(toolButton(.pen, kind: .pen, selectedTool: selectedTool))
-    stack.addArrangedSubview(toolStack)
 
     widthSlider.doubleValue = style.strokeWidth
     widthSlider.target = self
@@ -285,19 +306,6 @@ private final class ToolOptionsView: NSView {
     ])
   }
 
-  private func toolButton(
-    _ tool: AnnotationTool,
-    kind: ToolbarIconButton.Kind,
-    selectedTool: AnnotationTool
-  ) -> ToolbarIconButton {
-    let button = ToolbarIconButton(kind: kind, size: NSSize(width: 48, height: 36))
-    button.isSelected = tool == selectedTool
-    button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
-    button.target = self
-    button.action = #selector(toolChanged(_:))
-    return button
-  }
-
   private func optionRow(title: String, control: NSView) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
@@ -310,16 +318,6 @@ private final class ToolOptionsView: NSView {
     row.addArrangedSubview(label)
     row.addArrangedSubview(control)
     return row
-  }
-
-  @objc private func toolChanged(_ sender: NSButton) {
-    guard
-      let rawValue = sender.identifier?.rawValue,
-      let tool = AnnotationTool(rawValue: rawValue)
-    else {
-      return
-    }
-    onToolChanged(tool)
   }
 
   @objc private func widthChanged() {
@@ -439,6 +437,7 @@ private final class ToolbarIconButton: NSButton {
     case toolbox
     case text
     case mosaic
+    case style
     case rectangle
     case arrow
     case pen
@@ -543,6 +542,8 @@ private final class ToolbarIconButton: NSButton {
       drawTextIcon(in: rect, color: color)
     case .mosaic:
       drawMosaic(in: rect, color: color)
+    case .style:
+      drawStyle(in: rect, color: color)
     case .rectangle:
       drawRectangle(in: rect, color: color)
     case .arrow:
@@ -641,6 +642,29 @@ private final class ToolbarIconButton: NSButton {
         ).fill()
       }
     }
+  }
+
+  private func drawStyle(in rect: NSRect, color: NSColor) {
+    color.setStroke()
+
+    let line = NSBezierPath()
+    line.move(to: NSPoint(x: rect.minX + 2, y: rect.midY + 3))
+    line.line(to: NSPoint(x: rect.maxX - 5, y: rect.midY + 3))
+    line.lineWidth = 2.8
+    line.lineCapStyle = .round
+    line.stroke()
+
+    NSColor.systemRed.withAlphaComponent(color.alphaComponent).setFill()
+    NSBezierPath(
+      ovalIn: NSRect(x: rect.maxX - 7, y: rect.midY - 5, width: 7, height: 7)
+    ).fill()
+
+    let thin = NSBezierPath()
+    thin.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 4))
+    thin.line(to: NSPoint(x: rect.maxX - 3, y: rect.minY + 4))
+    thin.lineWidth = 1.2
+    thin.lineCapStyle = .round
+    thin.stroke()
   }
 
   private func drawUndo(in rect: NSRect, color: NSColor) {
