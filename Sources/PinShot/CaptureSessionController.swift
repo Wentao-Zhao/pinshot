@@ -8,6 +8,12 @@ final class CaptureSessionController {
   private var overlayControllers: [CaptureOverlayWindowController] = []
   private var captureTask: Task<Void, Never>?
   private var ocrTask: Task<Void, Never>?
+  private var captureSessionID: UUID?
+  private var captureTargetsByID: [UInt32: ScreenCaptureTarget] = [:]
+  private var cancelHotKeyRegistered = false
+  private lazy var cancelHotKeyMonitor = HotKeyMonitor(identity: .captureCancel) { [weak self] in
+    self?.endCapture()
+  }
 
   init(
     preferencesStore: PreferencesStore,
@@ -18,7 +24,7 @@ final class CaptureSessionController {
   }
 
   func beginCapture() {
-    guard overlayControllers.isEmpty else {
+    guard overlayControllers.isEmpty, captureTask == nil else {
       return
     }
 
@@ -27,47 +33,113 @@ final class CaptureSessionController {
       return
     }
 
-    guard let screen = ScreenCaptureService.targetScreenForCapture() else {
+    let targets = ScreenCaptureService.captureTargets()
+    guard !targets.isEmpty else {
       showError(message: "无法捕获屏幕", detail: "没有获取到可用的屏幕图像。")
       return
     }
 
-    guard let displayID = ScreenCaptureService.placeholderSnapshot(screen: screen).displayID else {
-      showError(message: "无法捕获屏幕", detail: "没有获取到当前屏幕的显示器 ID。")
-      return
-    }
-
-    NSApp.activate(ignoringOtherApps: true)
-    let controller = makeOverlayController(snapshot: ScreenCaptureService.placeholderSnapshot(screen: screen))
-    overlayControllers = [controller]
-    controller.show()
-
-    let size = screen.frame.size
+    let sessionID = UUID()
+    captureSessionID = sessionID
+    startCancelMonitoring()
+    captureTargetsByID = Dictionary(uniqueKeysWithValues: targets.map { (UInt32($0.displayID), $0) })
+    let plan = MultiDisplayCapturePlan(displayIDs: targets.map { UInt32($0.displayID) })
     captureTask = Task.detached(priority: .userInitiated) {
-      let capturedImage = ScreenCaptureService.captureCGImage(displayID: displayID)
+      var capturedImages: [UInt32: SendableCapturedImage] = [:]
+      for step in plan.steps {
+        guard !Task.isCancelled else {
+          return
+        }
+        guard case .capture(let displayID) = step else {
+          break
+        }
+        if let image = ScreenCaptureService.captureCGImage(displayID: CGDirectDisplayID(displayID)) {
+          capturedImages[displayID] = image
+        }
+      }
+
+      let completedImages = capturedImages
       await MainActor.run {
-        let image = capturedImage.map { NSImage(cgImage: $0.cgImage, size: size) }
-        controller.updateImage(image)
+        self.presentCapturedImages(completedImages, plan: plan, sessionID: sessionID)
       }
     }
   }
 
   func runCaptureSmokeTest(onComplete: @escaping (Bool) -> Void) {
-    guard overlayControllers.isEmpty, let screen = NSScreen.main ?? NSScreen.screens.first else {
+    let screens = NSScreen.screens
+    guard overlayControllers.isEmpty, !screens.isEmpty else {
       onComplete(false)
       return
     }
 
-    NSApp.activate(ignoringOtherApps: true)
-    let controller = makeOverlayController(snapshot: ScreenCaptureService.syntheticSnapshot(screen: screen))
-    overlayControllers = [controller]
-    controller.show()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+      guard let self else {
+        onComplete(false)
+        return
+      }
+      let controllers = screens.map { screen in
+        self.makeOverlayController(snapshot: ScreenCaptureService.syntheticSnapshot(screen: screen))
+      }
+      let cancelRegistered = self.startCancelMonitoring()
+      let wasActive = NSApp.isActive
+      self.overlayControllers = controllers
+      controllers.forEach { $0.show() }
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak controller] in
-      let visible = controller?.window?.isVisible == true
-      self?.endCapture()
-      onComplete(visible)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        let visible = controllers.allSatisfy { $0.window?.isVisible == true }
+        let activationPreserved = NSApp.isActive == wasActive
+        self?.endCapture()
+        onComplete(visible && activationPreserved && cancelRegistered)
+      }
     }
+  }
+
+  private func presentCapturedImages(
+    _ capturedImages: [UInt32: SendableCapturedImage],
+    plan: MultiDisplayCapturePlan,
+    sessionID: UUID
+  ) {
+    guard captureSessionID == sessionID else {
+      return
+    }
+
+    captureTask = nil
+    var controllers: [CaptureOverlayWindowController] = []
+    for step in plan.steps {
+      guard case .present(let displayID) = step else {
+        continue
+      }
+      guard
+        let target = captureTargetsByID[displayID],
+        let capturedImage = capturedImages[displayID]
+      else {
+        continue
+      }
+      let image = NSImage(cgImage: capturedImage.cgImage, size: target.size)
+      controllers.append(makeOverlayController(snapshot: ScreenSnapshot(screen: target.screen, image: image)))
+    }
+
+    captureTargetsByID.removeAll()
+    guard !controllers.isEmpty else {
+      endCapture()
+      showError(message: "无法捕获屏幕", detail: "没有获取到可用的屏幕图像。")
+      return
+    }
+
+    overlayControllers = controllers
+    controllers.forEach { $0.show() }
+    if !cancelHotKeyRegistered {
+      controllers.first?.makeKey()
+    }
+  }
+
+  @discardableResult
+  private func startCancelMonitoring() -> Bool {
+    cancelHotKeyRegistered = cancelHotKeyMonitor.start(
+      shortcut: CaptureInteractionPolicy.cancelShortcut,
+      showsErrorAlert: false
+    )
+    return cancelHotKeyRegistered
   }
 
   private func makeOverlayController(snapshot: ScreenSnapshot) -> CaptureOverlayWindowController {
@@ -163,6 +235,10 @@ final class CaptureSessionController {
   }
 
   private func endCapture() {
+    cancelHotKeyMonitor.stop()
+    cancelHotKeyRegistered = false
+    captureSessionID = nil
+    captureTargetsByID.removeAll()
     captureTask?.cancel()
     captureTask = nil
     ocrTask?.cancel()

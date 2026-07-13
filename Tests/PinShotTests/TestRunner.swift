@@ -28,6 +28,8 @@ struct TestRunner {
     testFileNaming(recorder)
     testSelectionGeometry(recorder)
     testScreenCoordinateMapping(recorder)
+    testMultiDisplayCapturePlan(recorder)
+    testCaptureInteractionPolicy(recorder)
     testAnnotationStyleDefaults(recorder)
     testPrimaryDrawingTools(recorder)
     testAnnotationUndoRedo(recorder)
@@ -112,6 +114,50 @@ struct TestRunner {
     recorder.expect(
       ScreenCoordinateMapper.localBounds(forScreenFrame: mainFrame) == Rect2D(x: 0, y: 0, width: 1512, height: 982),
       "screen local bounds always start at zero"
+    )
+  }
+
+  private static func testMultiDisplayCapturePlan(_ recorder: TestRecorder) {
+    let plan = MultiDisplayCapturePlan(displayIDs: [101, 202])
+    recorder.expect(
+      plan.steps == [
+        .capture(displayID: 101),
+        .capture(displayID: 202),
+        .present(displayID: 101),
+        .present(displayID: 202),
+      ],
+      "all displays are captured before any overlay is presented"
+    )
+    recorder.expect(
+      MultiDisplayCapturePlan(displayIDs: []).steps.isEmpty,
+      "an empty display list does not start a capture session"
+    )
+  }
+
+  private static func testCaptureInteractionPolicy(_ recorder: TestRecorder) {
+    recorder.expect(
+      CaptureInteractionPolicy.acceptsFirstMouse,
+      "the first drag is delivered before an overlay becomes key"
+    )
+    recorder.expect(
+      CaptureInteractionPolicy.cancelShortcut.keyCode == 53
+        && CaptureInteractionPolicy.cancelShortcut.modifiers.isEmpty,
+      "Escape cancels an inactive capture session without extra modifiers"
+    )
+    recorder.expect(
+      HotKeyIdentity.capture != .captureCancel,
+      "capture and cancel hot keys use distinct identities"
+    )
+    recorder.expect(
+      HotKeyIdentity.capture.matches(signature: HotKeyIdentity.capture.signature, id: HotKeyIdentity.capture.id),
+      "a hot key identity matches its own Carbon event"
+    )
+    recorder.expect(
+      !HotKeyIdentity.capture.matches(
+        signature: HotKeyIdentity.captureCancel.signature,
+        id: HotKeyIdentity.captureCancel.id
+      ),
+      "a hot key identity rejects another monitor's Carbon event"
     )
   }
 

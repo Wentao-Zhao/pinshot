@@ -57,6 +57,10 @@ final class CaptureOverlayView: NSView {
     true
   }
 
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    CaptureInteractionPolicy.acceptsFirstMouse
+  }
+
   override func viewDidMoveToWindow() {
     window?.makeFirstResponder(self)
   }

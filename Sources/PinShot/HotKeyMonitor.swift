@@ -7,29 +7,41 @@ final class HotKeyMonitor {
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandlerRef: EventHandlerRef?
   private var currentShortcut: KeyboardShortcut?
-  private let onTrigger: () -> Void
+  private let identity: HotKeyIdentity
+  private let callbackContext: HotKeyCallbackContext
 
-  init(onTrigger: @escaping () -> Void) {
-    self.onTrigger = onTrigger
+  init(identity: HotKeyIdentity = .capture, onTrigger: @escaping () -> Void) {
+    self.identity = identity
+    callbackContext = HotKeyCallbackContext(identity: identity) {
+      Task { @MainActor in
+        onTrigger()
+      }
+    }
   }
 
-  func start(shortcut: KeyboardShortcut) {
+  @discardableResult
+  func start(shortcut: KeyboardShortcut, showsErrorAlert: Bool = true) -> Bool {
     currentShortcut = shortcut
-    register(shortcut: shortcut, showsErrorAlert: true)
+    return register(shortcut: shortcut, showsErrorAlert: showsErrorAlert)
   }
 
   func refresh() {
     guard let currentShortcut else {
       return
     }
-    register(shortcut: currentShortcut, showsErrorAlert: false)
+    _ = register(shortcut: currentShortcut, showsErrorAlert: false)
   }
 
-  private func register(shortcut: KeyboardShortcut, showsErrorAlert: Bool) {
+  private func register(shortcut: KeyboardShortcut, showsErrorAlert: Bool) -> Bool {
     stopHotKey()
-    installEventHandlerIfNeeded()
+    guard installEventHandlerIfNeeded() else {
+      if showsErrorAlert {
+        showHotKeyRegistrationError(OSStatus(eventInternalErr))
+      }
+      return false
+    }
 
-    let hotKeyID = EventHotKeyID(signature: fourCharCode("PINS"), id: 1)
+    let hotKeyID = EventHotKeyID(signature: identity.signature, id: identity.id)
     let status = RegisterEventHotKey(
       UInt32(shortcut.keyCode),
       carbonModifiers(for: shortcut.modifiers),
@@ -44,7 +56,9 @@ final class HotKeyMonitor {
       if showsErrorAlert {
         showHotKeyRegistrationError(status)
       }
+      return false
     }
+    return true
   }
 
   func stop() {
@@ -56,9 +70,9 @@ final class HotKeyMonitor {
     }
   }
 
-  private func installEventHandlerIfNeeded() {
+  private func installEventHandlerIfNeeded() -> Bool {
     guard eventHandlerRef == nil else {
-      return
+      return true
     }
 
     var eventType = EventTypeSpec(
@@ -66,27 +80,45 @@ final class HotKeyMonitor {
       eventKind: OSType(kEventHotKeyPressed)
     )
 
-    let selfPointer = Unmanaged.passUnretained(self).toOpaque()
+    let contextPointer = Unmanaged.passUnretained(callbackContext).toOpaque()
     let status = InstallEventHandler(
       GetApplicationEventTarget(),
-      { _, _, userData in
-        guard let userData else {
-          return noErr
+      { _, event, userData in
+        guard let event, let userData else {
+          return OSStatus(eventNotHandledErr)
         }
-        let monitor = Unmanaged<HotKeyMonitor>.fromOpaque(userData).takeUnretainedValue()
-        Task { @MainActor in
-          monitor.onTrigger()
+
+        var eventHotKeyID = EventHotKeyID()
+        let parameterStatus = GetEventParameter(
+          event,
+          EventParamName(kEventParamDirectObject),
+          EventParamType(typeEventHotKeyID),
+          nil,
+          MemoryLayout<EventHotKeyID>.size,
+          nil,
+          &eventHotKeyID
+        )
+        guard parameterStatus == noErr else {
+          return OSStatus(eventNotHandledErr)
         }
+
+        let context = Unmanaged<HotKeyCallbackContext>.fromOpaque(userData).takeUnretainedValue()
+        guard context.identity.matches(signature: eventHotKeyID.signature, id: eventHotKeyID.id) else {
+          return OSStatus(eventNotHandledErr)
+        }
+        context.trigger()
         return noErr
       },
       1,
       &eventType,
-      selfPointer,
+      contextPointer,
       &eventHandlerRef
     )
     if status != noErr {
       eventHandlerRef = nil
+      return false
     }
+    return true
   }
 
   private func stopHotKey() {
@@ -105,15 +137,21 @@ final class HotKeyMonitor {
     return value
   }
 
-  private func fourCharCode(_ string: String) -> OSType {
-    string.utf8.reduce(0) { ($0 << 8) + OSType($1) }
-  }
-
   private func showHotKeyRegistrationError(_ status: OSStatus) {
     let alert = NSAlert()
     alert.messageText = "截图快捷键注册失败"
     alert.informativeText = "当前快捷键可能已被系统或其他 App 占用。错误码：\(status)"
     alert.alertStyle = .warning
     alert.runModal()
+  }
+}
+
+private final class HotKeyCallbackContext {
+  let identity: HotKeyIdentity
+  let trigger: () -> Void
+
+  init(identity: HotKeyIdentity, trigger: @escaping () -> Void) {
+    self.identity = identity
+    self.trigger = trigger
   }
 }

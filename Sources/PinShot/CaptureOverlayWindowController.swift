@@ -21,7 +21,7 @@ final class CaptureOverlayWindowController: NSWindowController {
 
     let panel = CaptureOverlayPanel(
       contentRect: snapshot.screen.frame,
-      styleMask: [.borderless],
+      styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
       defer: false,
       screen: snapshot.screen
@@ -54,8 +54,11 @@ final class CaptureOverlayWindowController: NSWindowController {
     }
     window.setFrame(snapshot.screen.frame, display: false)
     window.contentView?.frame = NSRect(origin: .zero, size: snapshot.screen.frame.size)
-    window.makeKeyAndOrderFront(nil)
     window.orderFrontRegardless()
+  }
+
+  func makeKey() {
+    window?.makeKey()
   }
 
   func updateImage(_ image: NSImage?) {
@@ -79,6 +82,6 @@ private final class CaptureOverlayPanel: NSPanel {
   }
 
   override var canBecomeMain: Bool {
-    true
+    false
   }
 }

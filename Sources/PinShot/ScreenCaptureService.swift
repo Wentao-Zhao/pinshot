@@ -13,6 +13,12 @@ struct ScreenSnapshot {
   }
 }
 
+struct ScreenCaptureTarget {
+  let screen: NSScreen
+  let displayID: CGDirectDisplayID
+  let size: NSSize
+}
+
 struct SendableCapturedImage: @unchecked Sendable {
   let cgImage: CGImage
 }
@@ -26,13 +32,13 @@ enum ScreenCaptureService {
     CGRequestScreenCaptureAccess()
   }
 
-  static func targetScreenForCapture() -> NSScreen? {
-    let mouseLocation = NSEvent.mouseLocation
-    return NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main ?? NSScreen.screens.first
-  }
-
-  static func placeholderSnapshot(screen: NSScreen) -> ScreenSnapshot {
-    ScreenSnapshot(screen: screen, image: nil)
+  static func captureTargets() -> [ScreenCaptureTarget] {
+    NSScreen.screens.compactMap { screen in
+      guard let displayID = ScreenSnapshot(screen: screen, image: nil).displayID else {
+        return nil
+      }
+      return ScreenCaptureTarget(screen: screen, displayID: displayID, size: screen.frame.size)
+    }
   }
 
   static func captureImage(displayID: CGDirectDisplayID, size: NSSize) -> NSImage? {
