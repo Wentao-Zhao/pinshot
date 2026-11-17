@@ -299,17 +299,12 @@ struct TestRunner {
     recorder.expect(!OCRPanelState.hidden.isVisible, "hidden state is not visible")
 
     let empty = OCRPanelState.result(from: " \n ")
-    recorder.expect(empty.previewText == "未识别到文字", "blank OCR result uses fallback text")
-    recorder.expect(!empty.canCopy, "blank OCR result cannot be copied")
+    recorder.expect(empty.displayText == "未识别到文字", "blank OCR result uses fallback text")
+    recorder.expect(empty.recognizedText == nil, "blank OCR result cannot be copied")
 
-    let readableText = String(repeating: "识别内容", count: 30)
-    let readable = OCRPanelState.result(from: readableText)
-    recorder.expect(readable.previewText.count > 80, "OCR result preview keeps enough text for the expanded panel")
-
-    let longText = String(repeating: "识别内容", count: 50)
+    let longText = "第一行\n\n" + String(repeating: "识别内容", count: 50)
     let result = OCRPanelState.result(from: longText)
-    recorder.expect(result.previewText.count <= 142, "long OCR result preview remains bounded")
-    recorder.expect(result.previewText.hasSuffix("…"), "long OCR result preview shows truncation")
-    recorder.expect(result.copyText == longText, "OCR result keeps full text for copying")
+    recorder.expect(result.displayText == longText, "OCR displays the full text with line breaks")
+    recorder.expect(result.recognizedText == longText, "OCR result keeps full text for copying")
   }
 }

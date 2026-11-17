@@ -159,8 +159,8 @@ final class CaptureSessionController {
         endCapture()
         return
       }
-      performDefaultAction(with: image)
       endCapture()
+      performDefaultAction(with: image)
     case .copy:
       guard let image else {
         return
@@ -177,8 +177,8 @@ final class CaptureSessionController {
       guard let image else {
         return
       }
-      pinnedImageWindowManager.show(image: image)
       endCapture()
+      pinnedImageWindowManager.show(image: image)
     case .ocr:
       guard let image else {
         source?.setOCRPanelState(.result(from: nil))

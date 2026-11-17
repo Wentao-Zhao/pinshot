@@ -1,4 +1,5 @@
 import AppKit
+import PinShotCore
 
 @MainActor
 final class PinnedImageWindowManager {
@@ -21,20 +22,22 @@ final class PinnedImageWindowManager {
 }
 
 @MainActor
-private final class PinnedImageWindowController: NSWindowController, NSWindowDelegate {
+private final class PinnedImageWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate {
   var onClose: (() -> Void)?
   private let image: NSImage
+  private var ocrPopover: NSPopover?
+  private var ocrTask: Task<Void, Never>?
+  private var ocrResult: OCRPanelState?
 
   init(image: NSImage) {
     self.image = image
-    let window = NSPanel(
+    let window = PinnedImagePanel(
       contentRect: NSRect(x: 0, y: 0, width: 420, height: 300),
-      styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+      styleMask: [.borderless, .resizable],
       backing: .buffered,
       defer: false
     )
-    window.title = ""
-    window.titleVisibility = .hidden
+    window.title = "置顶截图"
     window.level = .floating
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     window.backgroundColor = .clear
@@ -43,13 +46,12 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.isReleasedWhenClosed = false
     window.hidesOnDeactivate = false
     window.isMovableByWindowBackground = true
-    window.minSize = NSSize(width: 220, height: 160)
-    window.titlebarAppearsTransparent = true
+    window.minSize = NSSize(width: 106, height: 44)
 
     super.init(window: window)
+    window.onCopyImage = { [weak self] in self?.copyImage(nil) }
     window.delegate = self
     buildContent(in: window)
-    configureWindowControls(in: window)
   }
 
   @available(*, unavailable)
@@ -61,169 +63,126 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     guard let window else {
       return
     }
-    window.setFrame(Self.defaultFrame(for: image, offset: offset), display: false)
+    window.setFrame(Self.defaultFrame(for: image, offset: offset, minimum: window.minSize), display: false)
     window.makeKeyAndOrderFront(nil)
   }
 
   func windowWillClose(_ notification: Notification) {
+    ocrTask?.cancel()
+    ocrPopover?.close()
     onClose?()
   }
 
   private func buildContent(in window: NSWindow) {
-    let frameView = PinnedImageFrameView()
+    let frameView = PinnedImageFrameView(image: image)
+    frameView.onCopy = { [weak self] in self?.copyImage(nil) }
+    frameView.onRecognize = { [weak self] in self?.toggleOCR(nil) }
     frameView.onClose = { [weak window] in
       window?.close()
     }
-    let imageView = NSImageView()
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.image = image
-    imageView.imageScaling = .scaleProportionallyUpOrDown
-    imageView.wantsLayer = true
-    imageView.layer?.cornerRadius = 12
-    imageView.layer?.masksToBounds = true
-    frameView.addSubview(imageView)
-    window.contentView = frameView
-
-    NSLayoutConstraint.activate([
-      imageView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 8),
-      imageView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -8),
-      imageView.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 38),
-      imageView.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -8),
-    ])
-  }
-
-  private func configureWindowControls(in window: NSWindow) {
-    window.standardWindowButton(.closeButton)?.isHidden = true
-    window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-    window.standardWindowButton(.zoomButton)?.isHidden = true
-  }
-
-  private static func defaultFrame(for image: NSImage, offset: CGFloat) -> NSRect {
-    let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-    let aspectRatio = image.size.width > 0 && image.size.height > 0 ? image.size.width / image.size.height : 4 / 3
-    var width = min(visibleFrame.width * 0.42, 560)
-    var height = width / aspectRatio
-    let maxHeight = min(visibleFrame.height * 0.46, 460)
-    if height > maxHeight {
-      height = maxHeight
-      width = height * aspectRatio
+    let menu = NSMenu()
+    for (title, action) in [
+      ("复制图片", #selector(copyImage(_:))),
+      ("识别文字", #selector(toggleOCR(_:))),
+      ("关闭置顶", #selector(closePin(_:))),
+    ] {
+      let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+      item.target = self
+      menu.addItem(item)
     }
-    width = min(max(width, 260), visibleFrame.width - 40)
-    height = min(max(height, 180), visibleFrame.height - 40)
+    frameView.imageView.menu = menu
+    frameView.menu = menu
+    window.contentView = frameView
+  }
+
+  @objc private func copyImage(_ sender: Any?) {
+    PasteboardWriter.copy(image: image)
+  }
+
+  @objc private func closePin(_ sender: Any?) {
+    window?.close()
+  }
+
+  @objc private func toggleOCR(_ sender: Any?) {
+    guard let frameView = window?.contentView as? PinnedImageFrameView else { return }
+    if let ocrPopover, ocrPopover.isShown {
+      ocrPopover.performClose(nil)
+      return
+    }
+
+    let popover = ocrPopover ?? makeOCRPopover()
+    ocrPopover = popover
+    updateOCRPopover(with: ocrResult ?? .recognizing)
+    frameView.layoutSubtreeIfNeeded()
+    popover.show(relativeTo: frameView.ocrAnchor, of: frameView, preferredEdge: .maxX)
+
+    guard ocrResult == nil, ocrTask == nil else { return }
+    ocrTask = Task { [weak self, image] in
+      let text = await ImageTextRecognizer.recognizedText(from: image)
+      guard !Task.isCancelled, let self else { return }
+      self.ocrTask = nil
+      let result = OCRPanelState.result(from: text)
+      self.ocrResult = result
+      if self.ocrPopover?.isShown == true {
+        self.updateOCRPopover(with: result)
+      }
+    }
+  }
+
+  private func makeOCRPopover() -> NSPopover {
+    let popover = NSPopover()
+    popover.behavior = .transient
+    popover.appearance = NSAppearance(named: .darkAqua)
+    popover.delegate = self
+    let viewController = NSViewController()
+    let panel = OCRStatusPanelView(frame: .zero)
+    panel.blendingMode = .withinWindow
+    panel.onClose = { [weak popover] in popover?.performClose(nil) }
+    viewController.view = panel
+    popover.contentViewController = viewController
+    return popover
+  }
+
+  private func updateOCRPopover(with state: OCRPanelState) {
+    guard let ocrPopover, let panel = ocrPopover.contentViewController?.view as? OCRStatusPanelView else { return }
+    panel.update(state: state)
+    let availableSize = window?.screen?.visibleFrame.size ?? NSSize(width: 384, height: 224)
+    ocrPopover.contentSize = panel.preferredSize(in: availableSize)
+  }
+
+  func popoverDidClose(_ notification: Notification) {
+    (ocrPopover?.contentViewController?.view as? OCRStatusPanelView)?.update(state: .hidden)
+  }
+
+  private static func defaultFrame(for image: NSImage, offset: CGFloat, minimum: NSSize) -> NSRect {
+    let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    let preferred = NSSize(width: min(visibleFrame.width * 0.42, 560), height: min(visibleFrame.height * 0.46, 460))
+    let fitted = PinnedImageFrameView.fit(image.size, in: preferred)
+    let width = max(fitted.width, minimum.width)
+    let height = max(fitted.height, minimum.height)
     return NSRect(
-      x: visibleFrame.midX - width / 2 + offset,
-      y: visibleFrame.midY - height / 2 - offset,
+      x: min(visibleFrame.midX - width / 2 + offset, visibleFrame.maxX - width),
+      y: max(visibleFrame.midY - height / 2 - offset, visibleFrame.minY),
       width: width,
       height: height
     )
   }
 }
 
-private final class PinnedImageFrameView: NSView {
-  var onClose: (() -> Void)?
-  private let closeButton = PinnedCloseButton()
+private final class PinnedImagePanel: NSPanel {
+  var onCopyImage: (() -> Void)?
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    wantsLayer = true
-    closeButton.target = self
-    closeButton.action = #selector(closeClicked)
-    closeButton.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(closeButton)
-    NSLayoutConstraint.activate([
-      closeButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
-      closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 15),
-      closeButton.widthAnchor.constraint(equalToConstant: 16),
-      closeButton.heightAnchor.constraint(equalToConstant: 16),
-    ])
-  }
+  override var canBecomeKey: Bool { true }
 
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
-
-  override var isOpaque: Bool {
-    false
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    let rect = bounds.insetBy(dx: 4, dy: 4)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 20, yRadius: 20)
-    NSColor.windowBackgroundColor.withAlphaComponent(0.18).setFill()
-    path.fill()
-
-    NSColor.white.withAlphaComponent(0.18).setStroke()
-    path.lineWidth = 0.8
-    path.stroke()
-  }
-
-  @objc private func closeClicked() {
-    onClose?()
-  }
-}
-
-private final class PinnedCloseButton: NSButton {
-  private var trackingAreaRef: NSTrackingArea?
-  private var isHovered = false {
-    didSet {
-      needsDisplay = true
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if let result = firstResponder as? OCRResultTextView, result.handleKeyEquivalent(event) {
+      return true
     }
-  }
-
-  init() {
-    super.init(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
-    title = ""
-    isBordered = false
-    focusRingType = .none
-    setButtonType(.momentaryChange)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
-
-  override func updateTrackingAreas() {
-    if let trackingAreaRef {
-      removeTrackingArea(trackingAreaRef)
+    let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+    if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "c", let onCopyImage {
+      onCopyImage()
+      return true
     }
-    let area = NSTrackingArea(
-      rect: bounds,
-      options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
-      owner: self,
-      userInfo: nil
-    )
-    addTrackingArea(area)
-    trackingAreaRef = area
-    super.updateTrackingAreas()
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    isHovered = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    isHovered = false
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    let rect = bounds.insetBy(dx: 1, dy: 1)
-    let path = NSBezierPath(ovalIn: rect)
-    (isHighlighted ? NSColor.white.withAlphaComponent(0.58) : NSColor.white.withAlphaComponent(isHovered ? 0.42 : 0.30)).setFill()
-    path.fill()
-
-    guard isHovered || isHighlighted else {
-      return
-    }
-    NSColor.black.withAlphaComponent(0.56).setStroke()
-    let cross = NSBezierPath()
-    cross.move(to: NSPoint(x: rect.minX + 4.5, y: rect.minY + 4.5))
-    cross.line(to: NSPoint(x: rect.maxX - 4.5, y: rect.maxY - 4.5))
-    cross.move(to: NSPoint(x: rect.maxX - 4.5, y: rect.minY + 4.5))
-    cross.line(to: NSPoint(x: rect.minX + 4.5, y: rect.maxY - 4.5))
-    cross.lineWidth = 1.4
-    cross.lineCapStyle = .round
-    cross.stroke()
+    return super.performKeyEquivalent(with: event)
   }
 }

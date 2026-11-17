@@ -38,11 +38,6 @@ final class CaptureOverlayView: NSView {
     toolbar.onCommand = { [weak self] command in
       self?.handleToolbarCommand(command)
     }
-    ocrPanel.onCopy = { text in
-      let pasteboard = NSPasteboard.general
-      pasteboard.clearContents()
-      pasteboard.setString(text, forType: .string)
-    }
     ocrPanel.onClose = { [weak self] in
       self?.setOCRPanelState(.hidden)
     }
@@ -110,6 +105,9 @@ final class CaptureOverlayView: NSView {
   }
 
   func setOCRPanelState(_ state: OCRPanelState) {
+    if state.recognizedText == nil, window?.firstResponder is OCRResultTextView {
+      window?.makeFirstResponder(self)
+    }
     ocrState = state
     ocrPanel.update(state: state)
     ocrPanel.isHidden = !state.isVisible
@@ -127,6 +125,7 @@ final class CaptureOverlayView: NSView {
       commitTextIfNeeded()
       return
     }
+    window?.makeFirstResponder(self)
     let point = localPoint(from: event)
 
     guard let selectionRect else {
@@ -455,7 +454,7 @@ final class CaptureOverlayView: NSView {
     guard !ocrPanel.isHidden else {
       return
     }
-    let panelSize = ocrPanel.preferredSize(maxWidth: min(520, bounds.width - 24))
+    let panelSize = ocrPanel.preferredSize(in: bounds.insetBy(dx: 12, dy: 12).size)
     let spacing: CGFloat = 8
     let rightX = toolbar.frame.maxX + spacing
     let leftX = toolbar.frame.minX - panelSize.width - spacing
@@ -463,10 +462,10 @@ final class CaptureOverlayView: NSView {
     let y: CGFloat
     if rightX + panelSize.width <= bounds.maxX - 12 {
       x = rightX
-      y = toolbar.frame.minY
+      y = toolbar.frame.maxY - panelSize.height
     } else if leftX >= 12 {
       x = leftX
-      y = toolbar.frame.minY
+      y = toolbar.frame.maxY - panelSize.height
     } else {
       x = min(max(toolbar.frame.maxX - panelSize.width, 12), bounds.width - panelSize.width - 12)
       let yBelow = toolbar.frame.minY - panelSize.height - spacing
@@ -477,7 +476,8 @@ final class CaptureOverlayView: NSView {
         y = min(yAbove, bounds.maxY - panelSize.height - 12)
       }
     }
-    ocrPanel.frame = NSRect(x: x, y: y, width: panelSize.width, height: panelSize.height)
+    let clampedY = max(12, min(y, bounds.maxY - panelSize.height - 12))
+    ocrPanel.frame = NSRect(x: x, y: clampedY, width: panelSize.width, height: panelSize.height)
   }
 
   private func drawSelectionFrame(_ rect: NSRect) {
@@ -542,138 +542,6 @@ final class CaptureOverlayView: NSView {
 private extension NSSize {
   var isUsable: Bool {
     width >= 8 && height >= 8
-  }
-}
-
-private final class OCRStatusPanelView: NSVisualEffectView {
-  var onCopy: ((String) -> Void)?
-  var onClose: (() -> Void)?
-
-  private let stack = NSStackView()
-  private let contentStack = NSStackView()
-  private let spinner = NSProgressIndicator()
-  private let titleLabel = NSTextField(labelWithString: "识别结果")
-  private let label = NSTextField(labelWithString: "")
-  private let copyButton = NSButton(title: "复制", target: nil, action: nil)
-  private let closeButton = NSButton(title: "×", target: nil, action: nil)
-  private var panelState = OCRPanelState.hidden
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    material = .hudWindow
-    blendingMode = .behindWindow
-    state = .active
-    wantsLayer = true
-    layer?.cornerRadius = 18
-    layer?.masksToBounds = true
-    layer?.borderWidth = 0.5
-    layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
-    buildContent()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
-
-  func update(state: OCRPanelState) {
-    panelState = state
-    label.stringValue = state.previewText
-    titleLabel.isHidden = state == .recognizing
-    copyButton.isHidden = !state.canCopy
-    closeButton.isHidden = state == .recognizing
-    if state == .recognizing {
-      spinner.isHidden = false
-      spinner.startAnimation(nil)
-    } else {
-      spinner.stopAnimation(nil)
-      spinner.isHidden = true
-    }
-    needsLayout = true
-  }
-
-  func preferredSize(maxWidth: CGFloat) -> NSSize {
-    if panelState == .recognizing {
-      return NSSize(width: min(148, maxWidth), height: 42)
-    }
-    let textWeight = CGFloat(min(max(panelState.previewText.count, 36), 90))
-    let textWidth = min(max(textWeight * 6.8, 260), maxWidth - 92)
-    let width = min(max(textWidth + 92, 340), maxWidth)
-    return NSSize(width: width, height: panelState.canCopy ? 82 : 66)
-  }
-
-  private func buildContent() {
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .horizontal
-    stack.alignment = .centerY
-    stack.spacing = 10
-    addSubview(stack)
-
-    spinner.style = .spinning
-    spinner.controlSize = .small
-    spinner.isDisplayedWhenStopped = false
-    spinner.translatesAutoresizingMaskIntoConstraints = false
-    spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
-    spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
-
-    titleLabel.textColor = NSColor.white.withAlphaComponent(0.58)
-    titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
-
-    label.textColor = NSColor.white.withAlphaComponent(0.88)
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
-    label.usesSingleLineMode = false
-    label.maximumNumberOfLines = 3
-    label.lineBreakMode = .byTruncatingTail
-    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-    contentStack.orientation = .vertical
-    contentStack.alignment = .leading
-    contentStack.spacing = 3
-    contentStack.addArrangedSubview(titleLabel)
-    contentStack.addArrangedSubview(label)
-
-    configureButton(copyButton)
-    copyButton.target = self
-    copyButton.action = #selector(copyClicked)
-
-    closeButton.isBordered = false
-    closeButton.font = .systemFont(ofSize: 14, weight: .bold)
-    closeButton.contentTintColor = NSColor.white.withAlphaComponent(0.58)
-    closeButton.target = self
-    closeButton.action = #selector(closeClicked)
-    closeButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
-
-    stack.addArrangedSubview(spinner)
-    stack.addArrangedSubview(contentStack)
-    stack.addArrangedSubview(copyButton)
-    stack.addArrangedSubview(closeButton)
-
-    NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-      stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-      stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-      copyButton.widthAnchor.constraint(equalToConstant: 46),
-    ])
-  }
-
-  private func configureButton(_ button: NSButton) {
-    button.bezelStyle = .rounded
-    button.controlSize = .small
-    button.font = .systemFont(ofSize: 11, weight: .semibold)
-  }
-
-  @objc private func copyClicked() {
-    guard let text = panelState.copyText else {
-      return
-    }
-    onCopy?(text)
-    label.stringValue = "已复制"
-    copyButton.isHidden = true
-  }
-
-  @objc private func closeClicked() {
-    onClose?()
   }
 }
 

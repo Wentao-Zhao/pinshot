@@ -77,6 +77,13 @@ final class CaptureOverlayWindowController: NSWindowController {
 }
 
 private final class CaptureOverlayPanel: NSPanel {
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if let result = firstResponder as? OCRResultTextView, result.handleKeyEquivalent(event) {
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
+  }
+
   override var canBecomeKey: Bool {
     true
   }
