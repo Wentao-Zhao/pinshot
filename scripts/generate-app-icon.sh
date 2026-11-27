@@ -19,5 +19,6 @@ swiftc "${SDK_ARGS[@]}" \
     "$ROOT_DIR/scripts/generate-app-icon.swift" \
     -o "$BUILD_DIR/generate-pinshot-app-icon"
 
+cd "$ROOT_DIR"
 "$BUILD_DIR/generate-pinshot-app-icon"
 echo "Created: $OUTPUT"
