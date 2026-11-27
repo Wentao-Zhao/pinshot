@@ -28,6 +28,7 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
   private var ocrPopover: NSPopover?
   private var ocrTask: Task<Void, Never>?
   private var ocrResult: OCRPanelState?
+  private var escapeMonitor: Any?
 
   init(image: NSImage) {
     self.image = image
@@ -52,6 +53,22 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
     window.onCopyImage = { [weak self] in self?.copyImage(nil) }
     window.delegate = self
     buildContent(in: window)
+    // The OCR popover has its own window, so handle Escape before either window's responder chain.
+    escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard event.keyCode == 53,
+            event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+            let self, let window = self.window, let eventWindow = event.window else { return event }
+      let ocrWindow = self.ocrPopover?.contentViewController?.view.window
+      guard eventWindow === window || (self.ocrPopover?.isShown == true && eventWindow === ocrWindow) else {
+        return event
+      }
+      window.close()
+      return nil
+    }
+  }
+
+  deinit {
+    if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
   }
 
   @available(*, unavailable)
@@ -68,6 +85,10 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
   }
 
   func windowWillClose(_ notification: Notification) {
+    if let escapeMonitor {
+      NSEvent.removeMonitor(escapeMonitor)
+      self.escapeMonitor = nil
+    }
     ocrTask?.cancel()
     ocrPopover?.close()
     onClose?()

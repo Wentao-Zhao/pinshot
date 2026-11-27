@@ -1,0 +1,8 @@
+{
+  "repository": "Wentao-Zhao/pinshot",
+  "app_name": "PinShot",
+  "target": "PinShot",
+  "key_account": "mac-app-updates.com.wentao.pinshot",
+  "sparkle_version": "2.10.1",
+  "source_repository": "Wentao-Zhao/pinshot"
+}

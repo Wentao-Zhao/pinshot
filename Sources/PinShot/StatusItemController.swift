@@ -36,6 +36,9 @@ final class StatusItemController: NSObject {
     menu.addItem(preferencesItem)
     menu.addItem(.separator())
 
+    menu.addItem(AppUpdater.shared.makeMenuItem())
+    menu.addItem(.separator())
+
     let quitItem = NSMenuItem(title: "退出 PinShot", action: #selector(quit), keyEquivalent: "q")
     quitItem.target = self
     menu.addItem(quitItem)

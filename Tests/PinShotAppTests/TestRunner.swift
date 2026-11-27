@@ -151,6 +151,8 @@ enum PinShotAppTests {
     secondWindow.close()
     PasteboardWriter.texts.removeAll()
 
+    testPinnedWindowEscape(app: app, image: first)
+
     let controller = CaptureOverlayWindowController(snapshot: ScreenSnapshot(screen: screen, image: first))
     let window = controller.window!
     let captureView = window.contentView!
@@ -224,6 +226,59 @@ enum PinShotAppTests {
       failures += 1
       print("FAIL: \(description)")
     }
+  }
+
+  private static func testPinnedWindowEscape(app: NSApplication, image: NSImage) {
+    let manager = PinnedImageWindowManager()
+    manager.show(image: image)
+    let first = app.windows.first { $0.isVisible && $0.title == "置顶截图" }!
+    manager.show(image: image)
+    let second = app.windows.first { $0.isVisible && $0.title == "置顶截图" && $0 !== first }!
+    defer {
+      if first.isVisible { first.close() }
+      if second.isVisible { second.close() }
+    }
+
+    let unrelated = NSPanel(contentRect: NSRect(x: 100, y: 100, width: 200, height: 100),
+                            styleMask: [.titled], backing: .buffered, defer: false)
+    unrelated.isReleasedWhenClosed = false
+    unrelated.makeKeyAndOrderFront(nil)
+    app.sendEvent(key("\u{1b}", modifiers: [], keyCode: 53, in: unrelated))
+    expect(first.isVisible && second.isVisible, "Escape in an unrelated window leaves all pins open")
+    unrelated.close()
+
+    first.makeKeyAndOrderFront(nil)
+    app.sendEvent(key("\u{1b}", modifiers: [], keyCode: 53, in: first))
+    expect(!first.isVisible && second.isVisible, "Escape closes only the key pin, not the most recently created pin")
+
+    manager.show(image: image)
+    let third = app.windows.first { $0.isVisible && $0.title == "置顶截图" && $0 !== second }!
+    defer { if third.isVisible { third.close() } }
+    second.makeKeyAndOrderFront(nil)
+    guard let pin = second.contentView, let ocrButton = button("识别文字", in: pin) else {
+      expect(false, "Escape OCR test finds the pin's OCR action")
+      return
+    }
+    pin.mouseEntered(with: tracking(.mouseEntered, in: second))
+    ocrButton.performClick(nil)
+    var result: NSTextView?
+    for _ in 0..<50 {
+      result = app.windows.flatMap { descendants(of: $0.contentView) }
+        .compactMap { $0 as? NSTextView }
+        .first { $0.window?.isVisible == true && $0.string.contains("PINSHOT") }
+      if result != nil { break }
+      RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    }
+    guard let result, let ocrWindow = result.window else {
+      expect(false, "Escape OCR test recognizes the pinned image")
+      return
+    }
+    ocrWindow.makeKeyAndOrderFront(nil)
+    expect(ocrWindow.makeFirstResponder(result), "pinned OCR text takes first responder before Escape")
+    app.sendEvent(key("\u{1b}", modifiers: [], keyCode: 53, in: ocrWindow))
+    expect(!second.isVisible, "Escape from focused OCR text closes its owning pin")
+    expect(!ocrWindow.isVisible, "closing a pin with Escape also dismisses its OCR popover")
+    expect(third.isVisible, "Escape from OCR leaves unrelated pins open")
   }
 
   private static func testThemeContrast() {

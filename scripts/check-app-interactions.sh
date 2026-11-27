@@ -11,6 +11,8 @@ swiftc "${compiler_args[@]}" -module-name PinShotCore -emit-module -emit-library
   -o "$build_dir/libPinShotCore.a" Sources/PinShotCore/*.swift
 sources=(Sources/PinShot/*.swift)
 sources=(${sources:#*/PinShotApp.swift})
+sources=(${sources:#*/AppUpdater.swift})
+sources=(${sources:#*/StatusItemController.swift})
 sources=(${sources:#*/PasteboardWriter.swift})
 swiftc "${compiler_args[@]}" -I "$build_dir" -L "$build_dir" -lPinShotCore \
   -o "$build_dir/PinShotAppTests" "${sources[@]}" Tests/PinShotAppTests/*.swift
