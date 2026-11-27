@@ -19,12 +19,12 @@ final class PreferencesWindowController: NSWindowController {
     self.onConfigurationChanged = onConfigurationChanged
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 268),
+      contentRect: NSRect(x: 0, y: 0, width: 540, height: 430),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
     )
-    window.title = "PinShot 偏好设置"
+    window.title = "PinShot 设置"
     window.isReleasedWhenClosed = false
 
     super.init(window: window)
@@ -45,33 +45,88 @@ final class PreferencesWindowController: NSWindowController {
   }
 
   private func buildContent() {
-    let stack = NSStackView()
+    configureControls()
+    let root = NSView()
+    window?.contentView = root
+
+    let heading = NSTextField(labelWithString: "PinShot")
+    heading.font = .systemFont(ofSize: 22, weight: .semibold)
+    let subtitle = NSTextField(labelWithString: "截图、标注与置顶，随手完成。")
+    subtitle.textColor = .secondaryLabelColor
+    subtitle.font = .systemFont(ofSize: 12)
+    let header = NSStackView(views: [heading, subtitle])
+    header.orientation = .vertical
+    header.alignment = .leading
+    header.spacing = 4
+
+    let capture = section("截图操作", rows: [
+      row(label: "截图快捷键", control: shortcutRecorderButton),
+      row(label: "完成后", control: defaultActionPopup),
+    ])
+    let files = section("文件与启动", rows: [
+      row(label: "保存位置", control: saveDirectoryControls()),
+      row(label: "登录时启动", control: launchAtLoginSwitch),
+    ])
+    let note = NSTextField(wrappingLabelWithString:
+      "OCR 在本地完成，截图内容不会上传。置顶图片支持拖动移动、滚轮缩放。")
+    note.textColor = .secondaryLabelColor
+    note.font = .systemFont(ofSize: 11)
+    note.maximumNumberOfLines = 2
+
+    let stack = NSStackView(views: [header, capture, files, note])
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 16
-    stack.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 20, right: 22)
-
-    configureControls()
-
-    stack.addArrangedSubview(row(label: "完成后默认动作", control: defaultActionPopup))
-    stack.addArrangedSubview(row(label: "截图快捷键", control: shortcutRecorderButton))
-    stack.addArrangedSubview(row(label: "保存目录", control: saveDirectoryControls()))
-    stack.addArrangedSubview(row(label: "开机自启", control: launchAtLoginSwitch))
-
-    let note = NSTextField(labelWithString: "默认快捷键为 ⌘⇧2。OCR 只在点击「识别文字」时运行，截图内容不会上传。")
-    note.textColor = .secondaryLabelColor
-    note.font = .systemFont(ofSize: 12)
-    note.maximumNumberOfLines = 2
-    stack.addArrangedSubview(note)
-
-    window?.contentView = stack
+    stack.spacing = 18
+    root.addSubview(stack)
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: window!.contentView!.leadingAnchor),
-      stack.trailingAnchor.constraint(equalTo: window!.contentView!.trailingAnchor),
-      stack.topAnchor.constraint(equalTo: window!.contentView!.topAnchor),
-      stack.bottomAnchor.constraint(equalTo: window!.contentView!.bottomAnchor),
+      stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 22),
+      stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -22),
+      stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -20),
+      capture.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      files.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      note.widthAnchor.constraint(equalTo: stack.widthAnchor),
     ])
+  }
+
+  private func section(_ title: String, rows: [NSView]) -> NSView {
+    let label = NSTextField(labelWithString: title)
+    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.textColor = .secondaryLabelColor
+    let box = NSBox()
+    box.boxType = .custom
+    box.titlePosition = .noTitle
+    box.fillColor = .controlBackgroundColor
+    box.borderColor = .separatorColor
+    box.borderWidth = 0.5
+    box.cornerRadius = 10
+    box.contentViewMargins = NSSize(width: 14, height: 6)
+    box.translatesAutoresizingMaskIntoConstraints = false
+    box.heightAnchor.constraint(equalToConstant: CGFloat(rows.count * 42 + 12)).isActive = true
+    let content = NSStackView(views: rows)
+    content.orientation = .vertical
+    content.alignment = .leading
+    content.spacing = 0
+    content.translatesAutoresizingMaskIntoConstraints = false
+    let container = box.contentView!
+    container.addSubview(content)
+    NSLayoutConstraint.activate([
+      content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      content.topAnchor.constraint(equalTo: container.topAnchor),
+      content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+    ])
+    for row in rows {
+      row.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+      row.heightAnchor.constraint(equalToConstant: 42).isActive = true
+    }
+    let section = NSStackView(views: [label, box])
+    section.orientation = .vertical
+    section.alignment = .leading
+    section.spacing = 8
+    box.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+    return section
   }
 
   private func configureControls() {
@@ -132,7 +187,7 @@ final class PreferencesWindowController: NSWindowController {
     stack.spacing = 8
 
     saveDirectoryField.translatesAutoresizingMaskIntoConstraints = false
-    saveDirectoryField.widthAnchor.constraint(equalToConstant: 220).isActive = true
+    saveDirectoryField.widthAnchor.constraint(equalToConstant: 194).isActive = true
     stack.addArrangedSubview(saveDirectoryField)
 
     let button = NSButton(title: "选择", target: self, action: #selector(chooseSaveDirectory))
@@ -174,7 +229,8 @@ final class PreferencesWindowController: NSWindowController {
   private func row(label: String, control: NSView) -> NSView {
     let labelField = NSTextField(labelWithString: label)
     labelField.translatesAutoresizingMaskIntoConstraints = false
-    labelField.widthAnchor.constraint(equalToConstant: 150).isActive = true
+    labelField.widthAnchor.constraint(equalToConstant: 110).isActive = true
+    labelField.font = .systemFont(ofSize: 13)
 
     let row = NSStackView()
     row.translatesAutoresizingMaskIntoConstraints = false
@@ -182,6 +238,9 @@ final class PreferencesWindowController: NSWindowController {
     row.alignment = .centerY
     row.spacing = 10
     row.addArrangedSubview(labelField)
+    let spacer = NSView()
+    spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    row.addArrangedSubview(spacer)
 
     control.translatesAutoresizingMaskIntoConstraints = false
     control.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true

@@ -9,26 +9,21 @@ enum MenuBarIcon {
     NSColor.clear.setFill()
     NSRect(origin: .zero, size: size).fill()
 
-    let body = NSBezierPath(roundedRect: NSRect(x: 3.5, y: 3.5, width: 11, height: 11), xRadius: 2.8, yRadius: 2.8)
-    NSColor.labelColor.setStroke()
-    body.lineWidth = 1.5
-    body.stroke()
-
-    let corner = NSBezierPath()
-    corner.move(to: NSPoint(x: 6, y: 12))
-    corner.line(to: NSPoint(x: 6, y: 14.5))
-    corner.line(to: NSPoint(x: 8.5, y: 14.5))
-    corner.lineWidth = 1.4
-    corner.stroke()
-
-    let pin = NSBezierPath()
-    pin.move(to: NSPoint(x: 11.8, y: 5.3))
-    pin.line(to: NSPoint(x: 13.8, y: 3.3))
-    pin.lineWidth = 1.4
-    pin.stroke()
-
-    let dot = NSBezierPath(ovalIn: NSRect(x: 8, y: 8, width: 2, height: 2))
-    dot.fill()
+    // Four open corners remain recognizable at the menu bar's native 18 pt size.
+    NSColor.black.setStroke()
+    let corners = NSBezierPath()
+    for (x, y, dx, dy) in [
+      (3.0, 3.0, 1.0, 1.0), (15.0, 3.0, -1.0, 1.0),
+      (3.0, 15.0, 1.0, -1.0), (15.0, 15.0, -1.0, -1.0),
+    ] {
+      corners.move(to: NSPoint(x: x, y: y + dy * 3.5))
+      corners.line(to: NSPoint(x: x, y: y))
+      corners.line(to: NSPoint(x: x + dx * 3.5, y: y))
+    }
+    corners.lineWidth = 1.8
+    corners.lineCapStyle = .round
+    corners.lineJoinStyle = .round
+    corners.stroke()
 
     image.unlockFocus()
     image.isTemplate = true

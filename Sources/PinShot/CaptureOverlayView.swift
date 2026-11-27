@@ -288,11 +288,26 @@ final class CaptureOverlayView: NSView {
     case .style(let style):
       annotationStyle = style
     case .undo:
+      commitTextIfNeeded()
       _ = annotations.undo()
       setNeedsDisplay(bounds)
+    case .redo:
+      commitTextIfNeeded()
+      _ = annotations.redo()
+      setNeedsDisplay(bounds)
     case .reset:
+      commitTextIfNeeded()
       annotations.reset()
       setNeedsDisplay(bounds)
+    case .cancel:
+      toolbar.closePopover()
+      onCommand?(.cancel, nil)
+    case .copy:
+      toolbar.closePopover()
+      onCommand?(.copy, renderedImage())
+    case .finish:
+      toolbar.closePopover()
+      onCommand?(.finishDefault, renderedImage())
     case .pin:
       onCommand?(.pin, renderedImage())
     case .ocr:

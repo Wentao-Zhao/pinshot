@@ -12,8 +12,12 @@ PinShot 是一个 macOS 13+ 菜单栏区域截图工具，支持选区标注、�
 - 文字工具可点击已有文字原位重新编辑。
 - 普通模式可拖动单个标注；拖动空白区域仍会移动整个截图选区。
 - 支持撤销、重做、清空标注。
+- 原生简洁工具栏按绘图、编辑和输出分组，提供取消、复制和完成按钮。
+- 截图工具栏、颜色弹窗、OCR、置顶操作条和设置窗口随 macOS 浅色/深色外观实时切换。
+- 菜单栏采用简洁的四角取景框图标，自动适配深浅色背景。
 - 支持复制到剪贴板、保存到文件、置顶显示。
 - 支持多张图片同时无框置顶。鼠标移入图片时，右上角显示复制、识别文字和关闭；拖动图片可移动，拖动右下角可等比缩放。
+- 鼠标移到置顶图片上，滚轮向上放大、向下缩小；触控板连续滚动也可缩放。以鼠标位置为中心保持比例，限制最小尺寸和当前屏幕内的最大尺寸。
 - 点选置顶图片后按 `⌘C`，或右键选择「复制图片」，即可复制原图。
 - 截图选区和置顶图片都支持 OCR。结果可滚动、拖选后按 `⌘C` 局部复制，也可点「复制全部」。
 - 菜单栏右键提供「偏好设置」和「退出」。
@@ -49,8 +53,7 @@ PinShot 是一个 macOS 13+ 菜单栏区域截图工具，支持选区标注、�
 
 ```bash
 cd PinShot
-PINSHOT_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk \
-  ./scripts/package-app.sh
+./scripts/package-app.sh
 ```
 
 生成文件：
@@ -68,13 +71,18 @@ dist/PinShot.app
 生成文件：
 
 ```text
-dist/PinShot-1.1.0.dmg
+dist/PinShot-1.2.0.dmg
 ```
 
 ## 自动化检查
 
 ```bash
-PINSHOT_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk \
-  swift run --disable-sandbox --sdk "$PINSHOT_SDK" PinShotLogicTests
+swift run --disable-sandbox PinShotLogicTests
 zsh scripts/check-app-interactions.sh
+```
+
+导出实际 AppKit 组件的浅色/深色界面预览（需要本机图形会话）：
+
+```bash
+PINSHOT_UI_PREVIEW_DIR="$PWD/dist/ui-preview" zsh scripts/check-app-interactions.sh
 ```

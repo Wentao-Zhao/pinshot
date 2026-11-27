@@ -1,4 +1,5 @@
 import AppKit
+import PinShotCore
 
 final class PinnedImageFrameView: NSView {
   var onCopy: (() -> Void)?
@@ -8,7 +9,7 @@ final class PinnedImageFrameView: NSView {
   let imageView: NSImageView = PinnedImageView()
   var ocrAnchor: NSRect { toolbar.frame }
 
-  private let toolbar = NSView()
+  private let toolbar = PinnedImageToolsSurface(frame: .zero)
   private let resizeHandle = PinnedImageResizeHandle()
   private var pointerTracking: NSTrackingArea?
 
@@ -23,11 +24,7 @@ final class PinnedImageFrameView: NSView {
     addSubview(imageView)
     addSubview(resizeHandle)
 
-    toolbar.wantsLayer = true
-    toolbar.layer?.backgroundColor = NSColor(srgbRed: 0.14, green: 0.19, blue: 0.26, alpha: 0.94).cgColor
     toolbar.layer?.cornerRadius = 8
-    toolbar.layer?.borderWidth = 0.5
-    toolbar.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
     toolbar.isHidden = true
     addSubview(toolbar)
 
@@ -41,13 +38,14 @@ final class PinnedImageFrameView: NSView {
         .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
       button.imagePosition = .imageOnly
       button.isBordered = false
-      button.contentTintColor = .white
+      button.contentTintColor = .labelColor
       button.toolTip = tool.1
       button.setAccessibilityLabel(tool.1)
       button.target = self
       button.action = tool.2
       toolbar.addSubview(button)
     }
+    toolTip = "拖动移动 · 滚轮缩放 · 右下角调整大小"
   }
 
   @available(*, unavailable)
@@ -90,6 +88,27 @@ final class PinnedImageFrameView: NSView {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 
+  override func scrollWheel(with event: NSEvent) {
+    guard let window, let screen = window.screen,
+          event.momentumPhase.isEmpty, event.scrollingDeltaY != 0,
+          abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX) else { return }
+    // Normalize natural scrolling so a physical upward wheel movement always zooms in.
+    let delta = event.scrollingDeltaY * (event.isDirectionInvertedFromDevice ? -1 : 1)
+    let current = window.frame
+    let visible = screen.visibleFrame
+    let anchor = event.window == nil
+      ? NSPoint(x: current.midX, y: current.midY)
+      : window.convertPoint(toScreen: event.locationInWindow)
+    let result = PinnedImageZoomPolicy.frame(
+      byZooming: Rect2D(x: current.minX, y: current.minY, width: current.width, height: current.height),
+      at: Point2D(x: anchor.x, y: anchor.y), scrollDelta: delta,
+      precise: event.hasPreciseScrollingDeltas,
+      minimumWidth: window.minSize.width, minimumHeight: window.minSize.height,
+      visibleFrame: Rect2D(x: visible.minX, y: visible.minY, width: visible.width, height: visible.height)
+    )
+    window.setFrame(NSRect(x: result.x, y: result.y, width: result.width, height: result.height), display: true)
+  }
+
   static func fit(_ image: NSSize, in bounds: NSSize) -> NSSize {
     guard image.width > 0, image.height > 0 else { return bounds }
     let scale = min(bounds.width / image.width, bounds.height / image.height)
@@ -102,13 +121,21 @@ final class PinnedImageFrameView: NSView {
 }
 
 private final class PinnedImageView: NSImageView {
+  // Screenshot pixels must not participate in the dark material's vibrancy blending.
+  override var allowsVibrancy: Bool { false }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+  override func scrollWheel(with event: NSEvent) { superview?.scrollWheel(with: event) }
+}
+
+private final class PinnedImageToolsSurface: PinShotSurfaceView {
+  override func scrollWheel(with event: NSEvent) { superview?.scrollWheel(with: event) }
 }
 
 private final class PinnedImageToolButton: NSButton {
   override var mouseDownCanMoveWindow: Bool { false }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+  override func scrollWheel(with event: NSEvent) { superview?.scrollWheel(with: event) }
 }
 
 private final class PinnedImageResizeHandle: NSView {

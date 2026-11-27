@@ -4,56 +4,31 @@ import PinShotCore
 enum AnnotationToolbarCommand {
   case tool(AnnotationTool)
   case style(AnnotationStyle)
-  case undo
-  case reset
-  case pin
-  case ocr
+  case undo, redo, reset, pin, ocr, cancel, copy, finish
 }
 
-final class AnnotationToolbarView: NSVisualEffectView {
+final class AnnotationToolbarView: PinShotSurfaceView {
   var onCommand: ((AnnotationToolbarCommand) -> Void)?
 
   private let stack = NSStackView()
-  private let rectangleButton = ToolbarIconButton(kind: .rectangle)
-  private let arrowButton = ToolbarIconButton(kind: .arrow)
-  private let penButton = ToolbarIconButton(kind: .pen)
-  private let textButton = ToolbarIconButton(kind: .text)
-  private let mosaicButton = ToolbarIconButton(kind: .mosaic)
-  private let styleButton = ToolbarIconButton(kind: .style)
+  private var drawingButtons: [AnnotationTool: ToolbarIconButton] = [:]
+  private let styleButton = ToolbarIconButton(symbol: "circle.fill", label: "线条样式")
   private var popover: NSPopover?
-  private var selectedTool: AnnotationTool = .move
   private var style = AnnotationStyle.default
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    material = .hudWindow
-    blendingMode = .behindWindow
-    state = .active
-    wantsLayer = true
-    layer?.cornerRadius = 18
-    layer?.masksToBounds = true
-    layer?.borderWidth = 0.5
-    layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
     buildContent()
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
+  required init?(coder: NSCoder) { nil }
 
   func setSelectedTool(_ tool: AnnotationTool) {
-    selectedTool = tool
-    rectangleButton.isSelected = tool == .rectangle
-    arrowButton.isSelected = tool == .arrow
-    penButton.isSelected = tool == .pen
-    textButton.isSelected = tool == .text
-    mosaicButton.isSelected = tool == .mosaic
+    for (kind, button) in drawingButtons { button.isSelected = kind == tool }
   }
 
-  func currentStyle() -> AnnotationStyle {
-    style
-  }
+  func currentStyle() -> AnnotationStyle { style }
 
   func closePopover() {
     popover?.close()
@@ -64,683 +39,336 @@ final class AnnotationToolbarView: NSVisualEffectView {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .horizontal
     stack.alignment = .centerY
-    stack.spacing = 6
+    stack.spacing = 3
     addSubview(stack)
 
-    configureDrawingButton(rectangleButton, tool: .rectangle, tooltip: "框选")
-    configureDrawingButton(arrowButton, tool: .arrow, tooltip: "箭头")
-    configureDrawingButton(penButton, tool: .pen, tooltip: "画笔")
-    configureTextButton()
-    configureMosaicButton()
-    configureStyleButton()
-
-    stack.addArrangedSubview(rectangleButton)
-    stack.addArrangedSubview(arrowButton)
-    stack.addArrangedSubview(penButton)
-    stack.addArrangedSubview(textButton)
-    stack.addArrangedSubview(mosaicButton)
+    for (tool, symbol, label) in [
+      (AnnotationTool.rectangle, "rectangle", "矩形"),
+      (.arrow, "arrow.up.right", "箭头"),
+      (.pen, "pencil", "画笔"),
+      (.text, "textformat", "文字"),
+      (.mosaic, "square.grid.3x3.fill", "马赛克"),
+    ] {
+      let button = ToolbarIconButton(symbol: symbol, label: label)
+      button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
+      button.target = self
+      button.action = #selector(toolClicked(_:))
+      drawingButtons[tool] = button
+      stack.addArrangedSubview(button)
+    }
+    styleButton.swatchColor = style.strokeColor.nsColor
+    styleButton.target = self
+    styleButton.action = #selector(showLineStyle)
     stack.addArrangedSubview(styleButton)
-    stack.addArrangedSubview(separator())
-    addIconCommand(.undo, tooltip: "撤销")
-    addIconCommand(.reset, tooltip: "重置")
-    stack.addArrangedSubview(separator())
-    addIconCommand(.pin, tooltip: "置顶")
-    addIconCommand(.ocr, tooltip: "识别文字")
+    addSeparator()
+    addCommand("arrow.uturn.backward", "撤销", "undo")
+    addCommand("arrow.uturn.forward", "重做", "redo")
+    addCommand("trash", "清空标注", "reset")
+    addSeparator()
+    addCommand("pin", "置顶", "pin")
+    addCommand("text.viewfinder", "识别文字", "ocr")
+    addSeparator()
+    addCommand("xmark", "取消截图", "cancel")
+    addCommand("square.on.square", "复制截图", "copy")
+
+    let finish = CaptureFinishButton(title: "完成", target: self, action: #selector(commandClicked(_:)))
+    finish.identifier = NSUserInterfaceItemIdentifier("finish")
+    finish.setAccessibilityLabel("完成截图")
+    finish.toolTip = "完成截图（回车）"
+    finish.translatesAutoresizingMaskIntoConstraints = false
+    finish.widthAnchor.constraint(equalToConstant: 58).isActive = true
+    finish.heightAnchor.constraint(equalToConstant: 28).isActive = true
+    stack.addArrangedSubview(finish)
 
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-      stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+      stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
     ])
   }
 
-  private func configureDrawingButton(
-    _ button: ToolbarIconButton,
-    tool: AnnotationTool,
-    tooltip: String
-  ) {
-    button.toolTip = tooltip
-    button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
+  private func addCommand(_ symbol: String, _ label: String, _ key: String) {
+    let button = ToolbarIconButton(symbol: symbol, label: label)
+    button.identifier = NSUserInterfaceItemIdentifier(key)
     button.target = self
-    button.action = #selector(toolButtonClicked(_:))
-  }
-
-  private func configureTextButton() {
-    textButton.toolTip = "文字"
-    textButton.target = self
-    textButton.action = #selector(showTextPopover)
-  }
-
-  private func configureMosaicButton() {
-    mosaicButton.toolTip = "马赛克"
-    mosaicButton.target = self
-    mosaicButton.action = #selector(selectMosaic)
-  }
-
-  private func configureStyleButton() {
-    styleButton.toolTip = "线条样式"
-    styleButton.target = self
-    styleButton.action = #selector(showLineStylePopover)
-  }
-
-  private func addIconCommand(
-    _ command: AnnotationToolbarCommand,
-    tooltip: String
-  ) {
-    let kind: ToolbarIconButton.Kind
-    switch command {
-    case .undo:
-      kind = .undo
-    case .reset:
-      kind = .reset
-    case .pin:
-      kind = .pin
-    case .ocr:
-      kind = .ocr
-    default:
-      kind = .style
-    }
-    let button = ToolbarIconButton(kind: kind)
-    button.toolTip = tooltip
-    button.identifier = NSUserInterfaceItemIdentifier(commandKey(for: command))
-    button.target = self
-    button.action = #selector(commandButtonClicked(_:))
+    button.action = #selector(commandClicked(_:))
     stack.addArrangedSubview(button)
   }
 
-  private func separator() -> NSView {
-    let view = ToolbarSeparatorView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.widthAnchor.constraint(equalToConstant: 1).isActive = true
-    view.heightAnchor.constraint(equalToConstant: 20).isActive = true
-    return view
-  }
-
-  @objc private func toolButtonClicked(_ sender: NSButton) {
-    guard
-      let rawValue = sender.identifier?.rawValue,
-      let tool = AnnotationTool(rawValue: rawValue)
-    else {
-      return
-    }
-    select(tool)
-  }
-
-  @objc private func showLineStylePopover() {
-    showPopover(
-      relativeTo: styleButton,
-      content: LineStyleOptionsView(
-        style: style,
-        onStyleChanged: { [weak self] style in
-          self?.updateStyle(style)
-        }
-      )
-    )
-  }
-
-  @objc private func showTextPopover() {
-    select(.text)
-    showPopover(
-      relativeTo: textButton,
-      content: TextOptionsView(
-        style: style,
-        onStyleChanged: { [weak self] style in
-          self?.updateStyle(style)
-        }
-      )
-    )
-  }
-
-  @objc private func selectMosaic() {
-    select(.mosaic)
-  }
-
-  @objc private func commandButtonClicked(_ sender: NSButton) {
-    guard let rawValue = sender.identifier?.rawValue else {
-      return
-    }
-
-    switch rawValue {
-    case "undo":
-      onCommand?(.undo)
-    case "reset":
-      onCommand?(.reset)
-    case "pin":
-      onCommand?(.pin)
-    case "ocr":
-      onCommand?(.ocr)
-    default:
-      break
+  private func addSeparator() {
+    let separator = NSBox()
+    separator.boxType = .separator
+    separator.translatesAutoresizingMaskIntoConstraints = false
+    separator.widthAnchor.constraint(equalToConstant: 1).isActive = true
+    separator.heightAnchor.constraint(equalToConstant: 18).isActive = true
+    stack.addArrangedSubview(separator)
+    stack.setCustomSpacing(7, after: separator)
+    if stack.arrangedSubviews.count > 1 {
+      stack.setCustomSpacing(7, after: stack.arrangedSubviews[stack.arrangedSubviews.count - 2])
     }
   }
 
-  private func select(_ tool: AnnotationTool) {
-    selectedTool = tool
+  @objc private func toolClicked(_ sender: NSButton) {
+    guard let key = sender.identifier?.rawValue, let tool = AnnotationTool(rawValue: key) else { return }
     setSelectedTool(tool)
     onCommand?(.tool(tool))
+    if tool == .text { showOptions(relativeTo: sender, editsText: true) }
   }
 
-  private func updateStyle(_ style: AnnotationStyle) {
-    self.style = style
-    onCommand?(.style(style))
+  @objc private func showLineStyle() {
+    showOptions(relativeTo: styleButton, editsText: false)
   }
 
-  private func showPopover(relativeTo button: NSView, content: NSView) {
+  private func showOptions(relativeTo button: NSView, editsText: Bool) {
     closePopover()
     let controller = NSViewController()
-    controller.view = content
+    controller.view = AnnotationStyleOptionsView(style: style, editsText: editsText) { [weak self] style in
+      self?.style = style
+      self?.styleButton.swatchColor = style.strokeColor.nsColor
+      self?.onCommand?(.style(style))
+    }
     let popover = NSPopover()
     popover.behavior = .transient
-    popover.appearance = NSAppearance(named: .vibrantDark)
     popover.contentViewController = controller
     self.popover = popover
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
   }
 
-  private func commandKey(for command: AnnotationToolbarCommand) -> String {
-    switch command {
-    case .undo:
-      "undo"
-    case .reset:
-      "reset"
-    case .pin:
-      "pin"
-    case .ocr:
-      "ocr"
-    case .tool(let tool):
-      tool.rawValue
-    case .style:
-      "style"
+  @objc private func commandClicked(_ sender: NSButton) {
+    let command: AnnotationToolbarCommand
+    switch sender.identifier?.rawValue {
+    case "undo": command = .undo
+    case "redo": command = .redo
+    case "reset": command = .reset
+    case "pin": command = .pin
+    case "ocr": command = .ocr
+    case "cancel": command = .cancel
+    case "copy": command = .copy
+    case "finish": command = .finish
+    default: return
     }
+    onCommand?(command)
   }
 }
-private final class LineStyleOptionsView: NSView {
-  private var style: AnnotationStyle
-  private let onStyleChanged: (AnnotationStyle) -> Void
-  private let widthSlider = NSSlider(value: 4, minValue: 1, maxValue: 12, target: nil, action: nil)
-  private let colorWell = NSColorWell(frame: .zero)
 
-  init(
-    style: AnnotationStyle,
-    onStyleChanged: @escaping (AnnotationStyle) -> Void
-  ) {
+private final class ToolbarIconButton: NSButton {
+  var isSelected = false { didSet { needsDisplay = true } }
+  var swatchColor: NSColor? { didSet { needsDisplay = true } }
+  private var isHovered = false { didSet { needsDisplay = true } }
+  private var pointerTracking: NSTrackingArea?
+
+  init(symbol: String, label: String) {
+    super.init(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+    image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+      .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
+    imagePosition = .imageOnly
+    imageScaling = .scaleProportionallyDown
+    isBordered = false
+    setButtonType(.momentaryChange)
+    focusRingType = .none
+    title = ""
+    toolTip = label
+    setAccessibilityLabel(label)
+    translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      widthAnchor.constraint(equalToConstant: 32), heightAnchor.constraint(equalToConstant: 32),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { nil }
+
+  override var intrinsicContentSize: NSSize { NSSize(width: 32, height: 32) }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let pointerTracking { removeTrackingArea(pointerTracking) }
+    let area = NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+                              owner: self, userInfo: nil)
+    addTrackingArea(area)
+    pointerTracking = area
+  }
+
+  override func mouseEntered(with event: NSEvent) { isHovered = true }
+  override func mouseExited(with event: NSEvent) { isHovered = false }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    let selected = isSelected || isHighlighted
+    if selected || isHovered {
+      (selected ? PinShotTheme.accent.withAlphaComponent(0.16)
+                : NSColor.labelColor.withAlphaComponent(0.07)).setFill()
+      NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).fill()
+    }
+    contentTintColor = swatchColor ?? (selected ? PinShotTheme.accent : .labelColor)
+    super.draw(dirtyRect)
+  }
+}
+
+/// Remains a blue primary action even in the nonactivating capture panel.
+private final class CaptureFinishButton: NSButton {
+  override var allowsVibrancy: Bool { false }
+
+  override func draw(_ dirtyRect: NSRect) {
+    (isHighlighted ? PinShotTheme.accent.blended(withFraction: 0.15, of: .black)! : PinShotTheme.accent).setFill()
+    NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white,
+    ]
+    let size = (title as NSString).size(withAttributes: attributes)
+    (title as NSString).draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
+                            withAttributes: attributes)
+  }
+}
+
+final class AnnotationStyleOptionsView: NSView {
+  private var style: AnnotationStyle
+  private let editsText: Bool
+  private let onStyleChanged: (AnnotationStyle) -> Void
+  private let slider = NSSlider()
+  private let colorWell = NSColorWell()
+  private var swatches: [ColorSwatchButton] = []
+
+  init(style: AnnotationStyle, editsText: Bool, onStyleChanged: @escaping (AnnotationStyle) -> Void) {
     self.style = style
+    self.editsText = editsText
     self.onStyleChanged = onStyleChanged
-    super.init(frame: NSRect(x: 0, y: 0, width: 218, height: 88))
-    wantsLayer = true
-    layer?.cornerRadius = 14
+    super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 108))
     buildContent()
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
+  required init?(coder: NSCoder) { nil }
 
   private func buildContent() {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 9
-    stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-    addSubview(stack)
-
-    widthSlider.doubleValue = style.strokeWidth
-    widthSlider.target = self
-    widthSlider.action = #selector(widthChanged)
-    widthSlider.widthAnchor.constraint(equalToConstant: 132).isActive = true
-    stack.addArrangedSubview(optionRow(title: "粗细", control: widthSlider))
-
-    colorWell.color = style.strokeColor.nsColor
+    let palette = NSStackView()
+    palette.orientation = .horizontal
+    palette.spacing = 7
+    for color in [NSColor.red, .orange, .yellow, .green, .blue, .black, .white] {
+      let swatch = ColorSwatchButton(color: color)
+      swatch.target = self
+      swatch.action = #selector(colorSelected(_:))
+      palette.addArrangedSubview(swatch)
+      swatches.append(swatch)
+    }
+    colorWell.color = (editsText ? style.textColor : style.strokeColor).nsColor
     colorWell.target = self
     colorWell.action = #selector(colorChanged)
-    stack.addArrangedSubview(optionRow(title: "颜色", control: colorWell))
+    colorWell.translatesAutoresizingMaskIntoConstraints = false
+    colorWell.widthAnchor.constraint(equalToConstant: 28).isActive = true
+    colorWell.heightAnchor.constraint(equalToConstant: 25).isActive = true
+    colorWell.setAccessibilityLabel("自定义颜色")
+    palette.addArrangedSubview(colorWell)
 
+    slider.minValue = editsText ? 12 : 1
+    slider.maxValue = editsText ? 56 : 12
+    slider.doubleValue = editsText ? style.fontSize : style.strokeWidth
+    slider.target = self
+    slider.action = #selector(sizeChanged)
+    slider.setAccessibilityLabel(editsText ? "文字字号" : "线条粗细")
+    slider.widthAnchor.constraint(equalToConstant: 188).isActive = true
+
+    let stack = NSStackView(views: [row("颜色", palette), row(editsText ? "字号" : "线宽", slider)])
+    stack.orientation = .vertical
+    stack.alignment = .leading
+    stack.spacing = 12
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(stack)
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-      stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-      stack.topAnchor.constraint(equalTo: topAnchor),
-      stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+      stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+      stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+      stack.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
+    updateSwatches()
   }
 
-  private func optionRow(title: String, control: NSView) -> NSView {
-    let row = NSStackView()
+  private func row(_ title: String, _ control: NSView) -> NSView {
+    let label = NSTextField(labelWithString: title)
+    label.font = .systemFont(ofSize: 12)
+    label.textColor = .secondaryLabelColor
+    label.widthAnchor.constraint(equalToConstant: 30).isActive = true
+    let row = NSStackView(views: [label, control])
     row.orientation = .horizontal
     row.alignment = .centerY
     row.spacing = 8
-    let label = NSTextField(labelWithString: title)
-    label.textColor = .secondaryLabelColor
-    label.font = .systemFont(ofSize: 12)
-    label.widthAnchor.constraint(equalToConstant: 34).isActive = true
-    row.addArrangedSubview(label)
-    row.addArrangedSubview(control)
-    return row
-  }
-
-  @objc private func widthChanged() {
-    style.strokeWidth = widthSlider.doubleValue
-    onStyleChanged(style)
-  }
-
-  @objc private func colorChanged() {
-    style.strokeColor = AnnotationColor(nsColor: colorWell.color)
-    onStyleChanged(style)
-  }
-}
-
-private final class TextOptionsView: NSView {
-  private var style: AnnotationStyle
-  private let onStyleChanged: (AnnotationStyle) -> Void
-  private let sizeSlider = NSSlider(value: 24, minValue: 12, maxValue: 56, target: nil, action: nil)
-  private let colorWell = NSColorWell(frame: .zero)
-
-  init(style: AnnotationStyle, onStyleChanged: @escaping (AnnotationStyle) -> Void) {
-    self.style = style
-    self.onStyleChanged = onStyleChanged
-    super.init(frame: NSRect(x: 0, y: 0, width: 218, height: 88))
-    wantsLayer = true
-    layer?.cornerRadius = 14
-    buildContent()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
-
-  private func buildContent() {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.alignment = .leading
-    stack.spacing = 9
-    stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-    addSubview(stack)
-
-    sizeSlider.doubleValue = style.fontSize
-    sizeSlider.target = self
-    sizeSlider.action = #selector(sizeChanged)
-    sizeSlider.widthAnchor.constraint(equalToConstant: 132).isActive = true
-    stack.addArrangedSubview(optionRow(title: "字号", control: sizeSlider))
-
-    colorWell.color = style.textColor.nsColor
-    colorWell.target = self
-    colorWell.action = #selector(colorChanged)
-    stack.addArrangedSubview(optionRow(title: "颜色", control: colorWell))
-
-    NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-      stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-      stack.topAnchor.constraint(equalTo: topAnchor),
-      stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-  }
-
-  private func optionRow(title: String, control: NSView) -> NSView {
-    let row = NSStackView()
-    row.orientation = .horizontal
-    row.alignment = .centerY
-    row.spacing = 8
-    let label = NSTextField(labelWithString: title)
-    label.textColor = .secondaryLabelColor
-    label.font = .systemFont(ofSize: 12)
-    label.widthAnchor.constraint(equalToConstant: 34).isActive = true
-    row.addArrangedSubview(label)
-    row.addArrangedSubview(control)
     return row
   }
 
   @objc private func sizeChanged() {
-    style.fontSize = sizeSlider.doubleValue
+    if editsText { style.fontSize = slider.doubleValue } else { style.strokeWidth = slider.doubleValue }
     onStyleChanged(style)
   }
 
+  @objc private func colorSelected(_ sender: ColorSwatchButton) {
+    colorWell.color = sender.color
+    colorChanged()
+  }
+
   @objc private func colorChanged() {
-    style.textColor = AnnotationColor(nsColor: colorWell.color)
+    let color = AnnotationColor(nsColor: colorWell.color)
+    if editsText { style.textColor = color } else { style.strokeColor = color }
+    updateSwatches()
     onStyleChanged(style)
+  }
+
+  private func updateSwatches() {
+    for swatch in swatches {
+      let lhs = swatch.color.usingColorSpace(.sRGB)!
+      let rhs = colorWell.color.usingColorSpace(.sRGB)!
+      swatch.state = abs(lhs.redComponent - rhs.redComponent) + abs(lhs.greenComponent - rhs.greenComponent)
+        + abs(lhs.blueComponent - rhs.blueComponent) < 0.04 ? .on : .off
+      swatch.needsDisplay = true
+    }
+  }
+}
+
+private final class ColorSwatchButton: NSButton {
+  let color: NSColor
+  override var allowsVibrancy: Bool { false }
+
+  init(color: NSColor) {
+    self.color = color
+    super.init(frame: NSRect(x: 0, y: 0, width: 19, height: 24))
+    isBordered = false
+    title = ""
+    setAccessibilityLabel(color.accessibilityName)
+    translatesAutoresizingMaskIntoConstraints = false
+    widthAnchor.constraint(equalToConstant: 19).isActive = true
+    heightAnchor.constraint(equalToConstant: 24).isActive = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { nil }
+
+  override func draw(_ dirtyRect: NSRect) {
+    let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 4))
+    color.setFill()
+    circle.fill()
+    NSColor.labelColor.withAlphaComponent(0.18).setStroke()
+    circle.lineWidth = 0.5
+    circle.stroke()
+    if state == .on {
+      PinShotTheme.accent.setStroke()
+      let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0, dy: 2))
+      ring.lineWidth = 1.5
+      ring.stroke()
+    }
   }
 }
 
 private extension AnnotationColor {
   var nsColor: NSColor {
-    NSColor(
-      calibratedRed: CGFloat(red),
-      green: CGFloat(green),
-      blue: CGFloat(blue),
-      alpha: CGFloat(alpha)
-    )
+    NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
   }
 
   init(nsColor: NSColor) {
-    let color = nsColor.usingColorSpace(.deviceRGB) ?? nsColor
-    self.init(
-      red: Double(color.redComponent),
-      green: Double(color.greenComponent),
-      blue: Double(color.blueComponent),
-      alpha: Double(color.alphaComponent)
-    )
-  }
-}
-
-private final class ToolbarSeparatorView: NSView {
-  override func draw(_ dirtyRect: NSRect) {
-    NSColor.white.withAlphaComponent(0.16).setFill()
-    bounds.insetBy(dx: 0, dy: 2).fill()
-  }
-}
-
-private final class ToolbarIconButton: NSButton {
-  enum Kind {
-    case toolbox
-    case text
-    case mosaic
-    case style
-    case rectangle
-    case arrow
-    case pen
-    case undo
-    case reset
-    case pin
-    case ocr
-  }
-
-  var isSelected = false {
-    didSet {
-      needsDisplay = true
-    }
-  }
-
-  private let kind: Kind
-  private let preferredSize: NSSize
-  private var trackingAreaRef: NSTrackingArea?
-  private var isHovered = false {
-    didSet {
-      needsDisplay = true
-    }
-  }
-
-  init(kind: Kind, size: NSSize = NSSize(width: 40, height: 32)) {
-    self.kind = kind
-    self.preferredSize = size
-    super.init(frame: NSRect(origin: .zero, size: size))
-    title = ""
-    isBordered = false
-    bezelStyle = .regularSquare
-    focusRingType = .none
-    setButtonType(.momentaryChange)
-    translatesAutoresizingMaskIntoConstraints = false
-    widthAnchor.constraint(equalToConstant: size.width).isActive = true
-    heightAnchor.constraint(equalToConstant: size.height).isActive = true
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    nil
-  }
-
-  override var intrinsicContentSize: NSSize {
-    preferredSize
-  }
-
-  override func updateTrackingAreas() {
-    if let trackingAreaRef {
-      removeTrackingArea(trackingAreaRef)
-    }
-    let trackingArea = NSTrackingArea(
-      rect: bounds,
-      options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
-      owner: self,
-      userInfo: nil
-    )
-    addTrackingArea(trackingArea)
-    trackingAreaRef = trackingArea
-    super.updateTrackingAreas()
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    isHovered = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    isHovered = false
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    let rect = bounds.insetBy(dx: 2, dy: 2)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
-    let pressed = isHighlighted || isSelected
-    let fillAlpha: CGFloat
-    if pressed {
-      fillAlpha = 0.18
-    } else if isHovered {
-      fillAlpha = 0.08
-    } else {
-      fillAlpha = 0
-    }
-    if fillAlpha > 0 {
-      NSColor.white.withAlphaComponent(fillAlpha).setFill()
-      path.fill()
-    }
-
-    if pressed {
-      NSColor.white.withAlphaComponent(0.18).setStroke()
-      path.lineWidth = 1
-      path.stroke()
-    }
-
-    drawIcon(in: rect.insetBy(dx: 9, dy: 7), color: NSColor.white.withAlphaComponent(pressed ? 0.95 : 0.78))
-  }
-
-  private func drawIcon(in rect: NSRect, color: NSColor) {
-    switch kind {
-    case .toolbox:
-      drawPen(in: rect, color: color)
-    case .text:
-      drawTextIcon(in: rect, color: color)
-    case .mosaic:
-      drawMosaic(in: rect, color: color)
-    case .style:
-      drawStyle(in: rect, color: color)
-    case .rectangle:
-      drawRectangle(in: rect, color: color)
-    case .arrow:
-      drawArrow(in: rect, color: color)
-    case .pen:
-      drawFreePen(in: rect, color: color)
-    case .undo:
-      drawUndo(in: rect, color: color)
-    case .reset:
-      drawReset(in: rect, color: color)
-    case .pin:
-      drawPin(in: rect, color: color)
-    case .ocr:
-      drawOCR(in: rect, color: color)
-    }
-  }
-
-  private func drawRectangle(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1.5, dy: 3), xRadius: 3, yRadius: 3)
-    path.lineWidth = 2.4
-    path.stroke()
-  }
-
-  private func drawArrow(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: rect.minX + 2, y: rect.minY + 3))
-    path.line(to: NSPoint(x: rect.maxX - 2, y: rect.maxY - 3))
-    path.move(to: NSPoint(x: rect.maxX - 3, y: rect.maxY - 10))
-    path.line(to: NSPoint(x: rect.maxX - 2, y: rect.maxY - 3))
-    path.line(to: NSPoint(x: rect.maxX - 10, y: rect.maxY - 4))
-    path.lineWidth = 2.5
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    path.stroke()
-  }
-
-  private func drawPen(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: rect.midX - 5, y: rect.minY + 2))
-    path.line(to: NSPoint(x: rect.midX, y: rect.maxY - 2))
-    path.line(to: NSPoint(x: rect.midX + 5, y: rect.minY + 2))
-    path.move(to: NSPoint(x: rect.midX - 3, y: rect.minY + 7))
-    path.line(to: NSPoint(x: rect.midX + 3, y: rect.minY + 7))
-    path.lineWidth = 2.4
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    path.stroke()
-  }
-
-  private func drawFreePen(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: rect.minX + 1, y: rect.minY + 5))
-    path.curve(
-      to: NSPoint(x: rect.maxX - 1, y: rect.midY),
-      controlPoint1: NSPoint(x: rect.minX + 7, y: rect.maxY - 2),
-      controlPoint2: NSPoint(x: rect.midX, y: rect.minY)
-    )
-    path.lineWidth = 2.6
-    path.lineCapStyle = .round
-    path.stroke()
-  }
-
-  private func drawTextIcon(in rect: NSRect, color: NSColor) {
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: min(rect.height + 1, 20), weight: .bold),
-      .foregroundColor: color,
-    ]
-    let text = "T"
-    let size = text.size(withAttributes: attributes)
-    text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2), withAttributes: attributes)
-  }
-
-  private func drawMosaic(in rect: NSRect, color: NSColor) {
-    let cols = 3
-    let rows = 3
-    let gap: CGFloat = 1.6
-    let cellWidth = (rect.width - gap * CGFloat(cols - 1)) / CGFloat(cols)
-    let cellHeight = (rect.height - gap * CGFloat(rows - 1)) / CGFloat(rows)
-    for row in 0..<rows {
-      for col in 0..<cols {
-        let alpha: CGFloat = (row + col).isMultiple(of: 2) ? 0.88 : 0.46
-        color.withAlphaComponent(alpha).setFill()
-        NSBezierPath(
-          roundedRect: NSRect(
-            x: rect.minX + CGFloat(col) * (cellWidth + gap),
-            y: rect.minY + CGFloat(row) * (cellHeight + gap),
-            width: cellWidth,
-            height: cellHeight
-          ),
-          xRadius: 1.5,
-          yRadius: 1.5
-        ).fill()
-      }
-    }
-  }
-
-  private func drawStyle(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-
-    let line = NSBezierPath()
-    line.move(to: NSPoint(x: rect.minX + 2, y: rect.midY + 3))
-    line.line(to: NSPoint(x: rect.maxX - 5, y: rect.midY + 3))
-    line.lineWidth = 2.8
-    line.lineCapStyle = .round
-    line.stroke()
-
-    NSColor.systemRed.withAlphaComponent(color.alphaComponent).setFill()
-    NSBezierPath(
-      ovalIn: NSRect(x: rect.maxX - 7, y: rect.midY - 5, width: 7, height: 7)
-    ).fill()
-
-    let thin = NSBezierPath()
-    thin.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 4))
-    thin.line(to: NSPoint(x: rect.maxX - 3, y: rect.minY + 4))
-    thin.lineWidth = 1.2
-    thin.lineCapStyle = .round
-    thin.stroke()
-  }
-
-  private func drawUndo(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath()
-    path.appendArc(
-      withCenter: NSPoint(x: rect.midX + 1, y: rect.midY),
-      radius: min(rect.width, rect.height) * 0.34,
-      startAngle: 315,
-      endAngle: 115,
-      clockwise: false
-    )
-    path.move(to: NSPoint(x: rect.minX + 4, y: rect.midY + 3))
-    path.line(to: NSPoint(x: rect.minX + 3, y: rect.midY + 10))
-    path.line(to: NSPoint(x: rect.minX + 10, y: rect.midY + 8))
-    path.lineWidth = 2.3
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    path.stroke()
-  }
-
-  private func drawReset(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let path = NSBezierPath()
-    path.appendArc(
-      withCenter: NSPoint(x: rect.midX, y: rect.midY),
-      radius: min(rect.width, rect.height) * 0.34,
-      startAngle: 35,
-      endAngle: 335,
-      clockwise: false
-    )
-    path.move(to: NSPoint(x: rect.maxX - 5, y: rect.midY + 8))
-    path.line(to: NSPoint(x: rect.maxX - 2, y: rect.midY + 1))
-    path.line(to: NSPoint(x: rect.maxX - 10, y: rect.midY + 2))
-    path.lineWidth = 2.3
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    path.stroke()
-  }
-
-  private func drawPin(in rect: NSRect, color: NSColor) {
-    color.setFill()
-    color.setStroke()
-
-    let cap = NSBezierPath(roundedRect: NSRect(x: rect.midX - 6, y: rect.maxY - 7, width: 12, height: 5), xRadius: 2.5, yRadius: 2.5)
-    cap.fill()
-
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: rect.midX - 4, y: rect.maxY - 8))
-    path.line(to: NSPoint(x: rect.midX - 2, y: rect.midY + 1))
-    path.line(to: NSPoint(x: rect.midX - 7, y: rect.midY - 2))
-    path.move(to: NSPoint(x: rect.midX + 4, y: rect.maxY - 8))
-    path.line(to: NSPoint(x: rect.midX + 2, y: rect.midY + 1))
-    path.line(to: NSPoint(x: rect.midX + 7, y: rect.midY - 2))
-    path.move(to: NSPoint(x: rect.midX - 7, y: rect.midY - 2))
-    path.line(to: NSPoint(x: rect.midX + 7, y: rect.midY - 2))
-    path.move(to: NSPoint(x: rect.midX, y: rect.midY - 2))
-    path.line(to: NSPoint(x: rect.midX, y: rect.minY + 1))
-    path.lineWidth = 2.0
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    path.stroke()
-  }
-
-  private func drawOCR(in rect: NSRect, color: NSColor) {
-    color.setStroke()
-    let frame = NSBezierPath(roundedRect: rect.insetBy(dx: 1.5, dy: 3), xRadius: 3, yRadius: 3)
-    frame.lineWidth = 2
-    frame.stroke()
-
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 11, weight: .bold),
-      .foregroundColor: color,
-    ]
-    let text = "A"
-    let size = text.size(withAttributes: attributes)
-    text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2), withAttributes: attributes)
+    let color = nsColor.usingColorSpace(.sRGB) ?? nsColor
+    self.init(red: Double(color.redComponent), green: Double(color.greenComponent),
+              blue: Double(color.blueComponent), alpha: Double(color.alphaComponent))
   }
 }

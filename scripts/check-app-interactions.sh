@@ -13,6 +13,6 @@ sources=(Sources/PinShot/*.swift)
 sources=(${sources:#*/PinShotApp.swift})
 sources=(${sources:#*/PasteboardWriter.swift})
 swiftc "${compiler_args[@]}" -I "$build_dir" -L "$build_dir" -lPinShotCore \
-  -o "$build_dir/PinShotAppTests" "${sources[@]}" Tests/PinShotAppTests/TestRunner.swift
+  -o "$build_dir/PinShotAppTests" "${sources[@]}" Tests/PinShotAppTests/*.swift
 "$build_dir/PinShotAppTests" | tee "$build_dir/results"
 rg -q '^PASS: [0-9]+ AppKit interaction checks$' "$build_dir/results"

@@ -38,6 +38,7 @@ struct TestRunner {
     testAnnotationItemEditing(recorder)
     testTextAnnotationSession(recorder)
     testOCRPanelState(recorder)
+    testPinnedImageZoom(recorder)
 
     if recorder.failures.isEmpty {
       print("PASS: \(recorder.checks) checks")
@@ -58,6 +59,44 @@ struct TestRunner {
     recorder.expect(!config.launchAtLoginEnabled, "launch at login defaults to disabled")
     recorder.expect(config.saveDirectoryPath.hasSuffix("/Desktop"), "default save directory is Desktop")
     recorder.expect(ScreenshotDefaultAction.allCases == [.copyToClipboard, .saveToFile, .pinImage], "default action options are stable")
+  }
+
+  private static func testPinnedImageZoom(_ recorder: TestRecorder) {
+    let original = Rect2D(x: 100, y: 100, width: 400, height: 250)
+    let anchor = Point2D(x: 200, y: 200)
+    let bounds = Rect2D(x: -1000, y: -1000, width: 3000, height: 2000)
+    func zoom(_ frame: Rect2D, _ delta: Double, precise: Bool = false, in visible: Rect2D? = nil) -> Rect2D {
+      PinnedImageZoomPolicy.frame(byZooming: frame, at: anchor, scrollDelta: delta, precise: precise,
+                                  minimumWidth: 106, minimumHeight: 44, visibleFrame: visible ?? bounds)
+    }
+    let enlarged = zoom(original, 1)
+    recorder.expect(enlarged.width > original.width, "wheel up enlarges a pinned image")
+    recorder.expect(abs(enlarged.width / enlarged.height - 1.6) < 0.000001, "zoom preserves aspect ratio")
+    recorder.expect(abs((anchor.x - enlarged.x) / enlarged.width - 0.25) < 0.000001,
+                    "zoom preserves the horizontal image point beneath the pointer")
+    recorder.expect(abs((anchor.y - enlarged.y) / enlarged.height - 0.4) < 0.000001,
+                    "zoom preserves the vertical image point beneath the pointer")
+    let restored = zoom(enlarged, -1)
+    recorder.expect(abs(restored.width - original.width) < 0.000001
+                      && abs(restored.x - original.x) < 0.000001,
+                    "opposite wheel steps exactly undo each other before pixel rounding")
+    let tiny = zoom(original, -10000)
+    recorder.expect(tiny.width >= 106 && tiny.height >= 44, "minimum zoom leaves tools usable")
+    let large = zoom(original, 10000)
+    recorder.expect(large.width <= bounds.width && large.height <= bounds.height, "maximum zoom fits the display")
+    recorder.expect(large.minX >= bounds.minX && large.maxX <= bounds.maxX
+                      && large.minY >= bounds.minY && large.maxY <= bounds.maxY,
+                    "zoom clamps the entire pin to the visible display")
+    recorder.expect(zoom(original, 1, precise: true).width < enlarged.width,
+                    "trackpad pixel deltas use gentler sensitivity than wheel ticks")
+    recorder.expect(zoom(original, 0) == original, "zero scroll leaves the pin in place")
+    recorder.expect(zoom(original, .nan) == original, "invalid scroll leaves the pin unchanged")
+    let portrait = zoom(Rect2D(x: 100, y: 100, width: 120, height: 800), -10000)
+    recorder.expect(portrait.width >= 106 && portrait.height >= 44, "portrait zoom respects both minimum dimensions")
+    let secondary = Rect2D(x: -1920, y: 0, width: 1920, height: 1080)
+    let secondaryPin = zoom(Rect2D(x: -1500, y: 200, width: 400, height: 250), 10000, in: secondary)
+    recorder.expect(secondaryPin.minX >= secondary.minX && secondaryPin.maxX <= secondary.maxX,
+                    "zoom stays on a secondary screen with a negative origin")
   }
 
   private static func testShortcutMatching(_ recorder: TestRecorder) {

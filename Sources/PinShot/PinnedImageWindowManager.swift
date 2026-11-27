@@ -132,7 +132,6 @@ private final class PinnedImageWindowController: NSWindowController, NSWindowDel
   private func makeOCRPopover() -> NSPopover {
     let popover = NSPopover()
     popover.behavior = .transient
-    popover.appearance = NSAppearance(named: .darkAqua)
     popover.delegate = self
     let viewController = NSViewController()
     let panel = OCRStatusPanelView(frame: .zero)

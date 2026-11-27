@@ -25,6 +25,12 @@ enum PinShotAppTests {
       exit(1)
     }
 
+    testThemeContrast()
+    let toolbar = AnnotationToolbarView(frame: NSRect(x: 0, y: 0, width: 640, height: 48))
+    for label in ["取消截图", "复制截图", "完成截图"] {
+      expect(button(label, in: toolbar) != nil, "capture toolbar exposes \(label)")
+    }
+
     let manager = PinnedImageWindowManager()
     let first = NSImage(size: NSSize(width: 320, height: 200))
     first.lockFocus()
@@ -75,6 +81,36 @@ enum PinShotAppTests {
       expect(false, "pin has a bottom-right resize handle")
     }
 
+    if let imageView = descendants(of: pin).compactMap({ $0 as? NSImageView }).first {
+      let beforeWheel = firstWindow.frame
+      imageView.scrollWheel(with: scroll(1))
+      expect(firstWindow.frame.width > beforeWheel.width, "scrolling up over the image enlarges the pin")
+      expect(abs(firstWindow.frame.width / firstWindow.frame.height - 1.6) < 0.01,
+             "wheel zoom preserves image aspect ratio")
+      let enlarged = firstWindow.frame
+      imageView.scrollWheel(with: scroll(-1))
+      expect(firstWindow.frame.width < enlarged.width, "scrolling down over the image shrinks the pin")
+      expect(abs(firstWindow.frame.width - beforeWheel.width) <= 1,
+             "equal opposite wheel steps restore the pin size within window pixel rounding")
+      let beforeHorizontal = firstWindow.frame
+      imageView.scrollWheel(with: scroll(0, horizontal: 5))
+      expect(firstWindow.frame.equalTo(beforeHorizontal),
+             "horizontal scrolling does not zoom the pin")
+      imageView.scrollWheel(with: scroll(1, horizontal: 8))
+      expect(firstWindow.frame.equalTo(beforeHorizontal), "mostly horizontal trackpad gestures do not zoom")
+      imageView.scrollWheel(with: scroll(5, momentum: 2))
+      expect(firstWindow.frame.equalTo(beforeHorizontal), "trackpad inertia does not keep zooming after release")
+      imageView.scrollWheel(with: scroll(-10000))
+      expect(firstWindow.frame.width >= firstWindow.minSize.width
+               && firstWindow.frame.height >= firstWindow.minSize.height,
+             "wheel zoom respects minimum pin dimensions")
+      imageView.scrollWheel(with: scroll(10000))
+      expect(firstWindow.frame.width <= screen.visibleFrame.width + 0.1
+               && firstWindow.frame.height <= screen.visibleFrame.height + 0.1,
+             "wheel zoom fits the current display")
+      firstWindow.setFrame(beforeWheel, display: false)
+    }
+
     if let copyButton = button("复制图片", in: pin),
        let ocrButton = button("识别文字", in: pin),
        let closeButton = button("关闭置顶", in: pin) {
@@ -117,6 +153,25 @@ enum PinShotAppTests {
 
     let controller = CaptureOverlayWindowController(snapshot: ScreenSnapshot(screen: screen, image: first))
     let window = controller.window!
+    let captureView = window.contentView!
+    captureView.mouseDown(with: mouse(.leftMouseDown, at: NSPoint(x: 100, y: 100), in: window))
+    captureView.mouseDragged(with: mouse(.leftMouseDragged, at: NSPoint(x: 600, y: 400), in: window))
+    captureView.mouseUp(with: mouse(.leftMouseUp, at: NSPoint(x: 600, y: 400), in: window))
+    var received: CaptureCommand?
+    var receivedImage: NSImage?
+    controller.onCommand = { command, image in received = command; receivedImage = image }
+    button("复制截图", in: captureView)?.performClick(nil)
+    if case .copy? = received {
+      expect(receivedImage != nil, "toolbar copy emits the rendered selection")
+    } else { expect(false, "toolbar copy routes to the capture command") }
+    button("完成截图", in: captureView)?.performClick(nil)
+    if case .finishDefault? = received {
+      expect(receivedImage != nil, "toolbar finish emits the rendered selection")
+    } else { expect(false, "toolbar finish follows the configured completion action") }
+    button("取消截图", in: captureView)?.performClick(nil)
+    if case .cancel? = received {
+      expect(receivedImage == nil, "toolbar cancel does not export a screenshot")
+    } else { expect(false, "toolbar cancel routes to the capture command") }
     let text = "第一行：你好 🌏\n" + String(repeating: "保留完整内容，不截断。\n", count: 50) + "最后一行"
     controller.setOCRPanelState(.result(from: text))
     window.contentView?.layoutSubtreeIfNeeded()
@@ -152,6 +207,13 @@ enum PinShotAppTests {
     }
     controller.close()
 
+    if let path = ProcessInfo.processInfo.environment["PINSHOT_UI_PREVIEW_DIR"] {
+      do {
+        try PreviewRenderer.render(to: URL(fileURLWithPath: path, isDirectory: true), sample: first)
+        expect(true, "light and dark previews render successfully")
+      } catch { expect(false, "UI previews failed: \(error)") }
+    }
+
     print(failures == 0 ? "PASS: \(checks) AppKit interaction checks" : "FAIL: \(failures) of \(checks) checks")
     exit(failures == 0 ? 0 : 1)
   }
@@ -162,6 +224,50 @@ enum PinShotAppTests {
       failures += 1
       print("FAIL: \(description)")
     }
+  }
+
+  private static func testThemeContrast() {
+    for name in [NSAppearance.Name.aqua, .darkAqua] {
+      let appearance = NSAppearance(named: name)!
+      let panel = OCRStatusPanelView(frame: NSRect(x: 0, y: 0, width: 384, height: 160))
+      panel.appearance = appearance
+      panel.update(state: .result(from: "浅色和深色都必须清晰可读"))
+      let result = descendants(of: panel).compactMap { $0 as? NSTextView }.first!
+      appearance.performAsCurrentDrawingAppearance {
+        let foreground = result.textColor!.usingColorSpace(.sRGB)!
+        let background = NSColor.windowBackgroundColor.usingColorSpace(.sRGB)!
+        expect(contrast(foreground, background) >= 4.5,
+               "OCR text has readable contrast in \(name.rawValue)")
+      }
+    }
+    let surface = PinShotSurfaceView(frame: NSRect(x: 0, y: 0, width: 100, height: 50))
+    surface.appearance = NSAppearance(named: .aqua)
+    let light = surface.layer?.backgroundColor
+    surface.appearance = NSAppearance(named: .darkAqua)
+    expect(light != surface.layer?.backgroundColor, "changing appearance updates resolved layer colors immediately")
+  }
+
+  private static func contrast(_ foreground: NSColor, _ background: NSColor) -> CGFloat {
+    func luminance(_ color: NSColor) -> CGFloat {
+      func linear(_ value: CGFloat) -> CGFloat {
+        value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+      }
+      return 0.2126 * linear(color.redComponent)
+        + 0.7152 * linear(color.greenComponent) + 0.0722 * linear(color.blueComponent)
+    }
+    let alpha = foreground.alphaComponent
+    let composited = NSColor(srgbRed: foreground.redComponent * alpha + background.redComponent * (1 - alpha),
+                             green: foreground.greenComponent * alpha + background.greenComponent * (1 - alpha),
+                             blue: foreground.blueComponent * alpha + background.blueComponent * (1 - alpha), alpha: 1)
+    let values = [luminance(composited), luminance(background)]
+    return (values.max()! + 0.05) / (values.min()! + 0.05)
+  }
+
+  private static func scroll(_ vertical: Int32, horizontal: Int32 = 0, momentum: Int64 = 0) -> NSEvent {
+    let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2,
+                        wheel1: vertical, wheel2: horizontal, wheel3: 0)!
+    event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+    return NSEvent(cgEvent: event)!
   }
 
   private static func descendants(of view: NSView?) -> [NSView] {

@@ -1,7 +1,7 @@
 import AppKit
 import PinShotCore
 
-final class OCRStatusPanelView: NSVisualEffectView {
+final class OCRStatusPanelView: PinShotSurfaceView {
   var onClose: (() -> Void)?
 
   private let header = NSStackView()
@@ -15,14 +15,6 @@ final class OCRStatusPanelView: NSVisualEffectView {
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    material = .hudWindow
-    blendingMode = .behindWindow
-    state = .active
-    wantsLayer = true
-    layer?.cornerRadius = 14
-    layer?.masksToBounds = true
-    layer?.borderWidth = 0.5
-    layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
     buildContent()
     update(state: .hidden)
   }
@@ -38,7 +30,7 @@ final class OCRStatusPanelView: NSVisualEffectView {
     closeButton.isHidden = recognizing
     copyAllButton.isHidden = text == nil
     scrollView.isHidden = text == nil
-    titleLabel.stringValue = text == nil ? state.displayText : "拖选文字后按 ⌘C"
+    titleLabel.stringValue = text == nil ? state.displayText : "识别文字 · 选中文字按 ⌘C"
     if recognizing {
       spinner.startAnimation(nil)
     } else {
@@ -72,7 +64,7 @@ final class OCRStatusPanelView: NSVisualEffectView {
     spinner.isDisplayedWhenStopped = false
 
     titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
-    titleLabel.textColor = NSColor.white.withAlphaComponent(0.72)
+    titleLabel.textColor = .secondaryLabelColor
     titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
     titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -83,7 +75,7 @@ final class OCRStatusPanelView: NSVisualEffectView {
 
     closeButton.isBordered = false
     closeButton.font = .systemFont(ofSize: 17, weight: .medium)
-    closeButton.contentTintColor = NSColor.white.withAlphaComponent(0.80)
+    closeButton.contentTintColor = .secondaryLabelColor
     closeButton.setAccessibilityLabel("关闭识别结果")
     closeButton.target = self
     closeButton.action = #selector(closeClicked)
@@ -140,7 +132,12 @@ final class OCRResultTextView: NSTextView {
     textContainerInset = NSSize(width: 0, height: 4)
     textContainer?.lineFragmentPadding = 0
     textContainer?.widthTracksTextView = true
-    textColor = NSColor.white.withAlphaComponent(0.94)
+    textColor = .labelColor
+    insertionPointColor = .labelColor
+    selectedTextAttributes = [
+      .backgroundColor: NSColor.selectedTextBackgroundColor,
+      .foregroundColor: NSColor.selectedTextColor,
+    ]
     font = .systemFont(ofSize: 13)
     setAccessibilityLabel("识别结果")
   }
