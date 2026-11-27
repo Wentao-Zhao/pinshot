@@ -305,9 +305,6 @@ final class CaptureOverlayView: NSView {
     case .copy:
       toolbar.closePopover()
       onCommand?(.copy, renderedImage())
-    case .finish:
-      toolbar.closePopover()
-      onCommand?(.finishDefault, renderedImage())
     case .pin:
       onCommand?(.pin, renderedImage())
     case .ocr:

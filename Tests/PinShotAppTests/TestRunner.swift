@@ -27,7 +27,7 @@ enum PinShotAppTests {
 
     testThemeContrast()
     let toolbar = AnnotationToolbarView(frame: NSRect(x: 0, y: 0, width: 640, height: 48))
-    for label in ["取消截图", "复制截图", "完成截图"] {
+    for label in ["取消截图", "复制截图"] {
       expect(button(label, in: toolbar) != nil, "capture toolbar exposes \(label)")
     }
 
@@ -164,10 +164,10 @@ enum PinShotAppTests {
     if case .copy? = received {
       expect(receivedImage != nil, "toolbar copy emits the rendered selection")
     } else { expect(false, "toolbar copy routes to the capture command") }
-    button("完成截图", in: captureView)?.performClick(nil)
+    captureView.keyDown(with: key("\r", modifiers: [], keyCode: 36, in: window))
     if case .finishDefault? = received {
-      expect(receivedImage != nil, "toolbar finish emits the rendered selection")
-    } else { expect(false, "toolbar finish follows the configured completion action") }
+      expect(receivedImage != nil, "Return emits the rendered selection")
+    } else { expect(false, "Return follows the configured completion action") }
     button("取消截图", in: captureView)?.performClick(nil)
     if case .cancel? = received {
       expect(receivedImage == nil, "toolbar cancel does not export a screenshot")
@@ -294,12 +294,12 @@ enum PinShotAppTests {
   }
 
   private static func key(
-    _ character: String, modifiers: NSEvent.ModifierFlags = .command, in window: NSWindow
+    _ character: String, modifiers: NSEvent.ModifierFlags = .command, keyCode: UInt16 = 8, in window: NSWindow
   ) -> NSEvent {
     NSEvent.keyEvent(
       with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
       windowNumber: window.windowNumber, context: nil, characters: character,
-      charactersIgnoringModifiers: character, isARepeat: false, keyCode: 8
+      charactersIgnoringModifiers: character, isARepeat: false, keyCode: keyCode
     )!
   }
 }

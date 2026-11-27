@@ -65,5 +65,44 @@ enum PreviewRenderer {
       try data!.write(to: directory.appendingPathComponent("pinshot-\(theme).png"))
       window.close()
     }
+    try renderToolbarComparison(to: directory.appendingPathComponent("toolbar-comparison.png"))
+  }
+
+  private static func renderToolbarComparison(to destination: URL) throws {
+    let themes: [(NSAppearance.Name, String)] = [(.aqua, "浅色模式"), (.darkAqua, "深色模式")]
+    let toolbars = themes.map { name, _ in
+      let toolbar = AnnotationToolbarView(frame: .zero)
+      toolbar.appearance = NSAppearance(named: name)
+      toolbar.setSelectedTool(.rectangle)
+      return toolbar
+    }
+    let width = max(540, toolbars.map { $0.fittingSize.width }.max()! + 48)
+    let bounds = NSRect(x: 0, y: 0, width: width, height: 176)
+    let window = NSWindow(contentRect: bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    let canvas = NSView(frame: bounds)
+    window.contentView = canvas
+    for (index, theme) in themes.enumerated() {
+      let appearance = NSAppearance(named: theme.0)!
+      let row = NSView(frame: NSRect(x: 0, y: index == 0 ? 88 : 0, width: width, height: 88))
+      row.appearance = appearance
+      row.wantsLayer = true
+      row.layer?.backgroundColor = PinShotTheme.resolved(.windowBackgroundColor, for: appearance)
+      canvas.addSubview(row)
+      let label = NSTextField(labelWithString: theme.1)
+      label.font = .systemFont(ofSize: 11, weight: .medium)
+      label.textColor = .secondaryLabelColor
+      label.frame = NSRect(x: 24, y: 66, width: 120, height: 16)
+      row.addSubview(label)
+      let toolbar = toolbars[index]
+      row.addSubview(toolbar)
+      toolbar.frame = NSRect(origin: NSPoint(x: 24, y: 12), size: toolbar.fittingSize)
+    }
+    window.displayIfNeeded()
+    canvas.layoutSubtreeIfNeeded()
+    let bitmap = canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds)!
+    canvas.cacheDisplay(in: canvas.bounds, to: bitmap)
+    try bitmap.representation(using: .png, properties: [:])!.write(to: destination)
+    window.close()
   }
 }

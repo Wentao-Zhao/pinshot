@@ -4,7 +4,7 @@ import PinShotCore
 enum AnnotationToolbarCommand {
   case tool(AnnotationTool)
   case style(AnnotationStyle)
-  case undo, redo, reset, pin, ocr, cancel, copy, finish
+  case undo, redo, reset, pin, ocr, cancel, copy
 }
 
 final class AnnotationToolbarView: PinShotSurfaceView {
@@ -42,11 +42,15 @@ final class AnnotationToolbarView: PinShotSurfaceView {
     stack.spacing = 3
     addSubview(stack)
 
+    styleButton.swatchColor = style.strokeColor.nsColor
+    styleButton.target = self
+    styleButton.action = #selector(showLineStyle)
+
     for (tool, symbol, label) in [
       (AnnotationTool.rectangle, "rectangle", "矩形"),
       (.arrow, "arrow.up.right", "箭头"),
       (.pen, "pencil", "画笔"),
-      (.text, "textformat", "文字"),
+      (.text, "T", "文字"),
       (.mosaic, "square.grid.3x3.fill", "马赛克"),
     ] {
       let button = ToolbarIconButton(symbol: symbol, label: label)
@@ -54,12 +58,9 @@ final class AnnotationToolbarView: PinShotSurfaceView {
       button.target = self
       button.action = #selector(toolClicked(_:))
       drawingButtons[tool] = button
+      if tool == .mosaic { stack.addArrangedSubview(styleButton) }
       stack.addArrangedSubview(button)
     }
-    styleButton.swatchColor = style.strokeColor.nsColor
-    styleButton.target = self
-    styleButton.action = #selector(showLineStyle)
-    stack.addArrangedSubview(styleButton)
     addSeparator()
     addCommand("arrow.uturn.backward", "撤销", "undo")
     addCommand("arrow.uturn.forward", "重做", "redo")
@@ -70,15 +71,6 @@ final class AnnotationToolbarView: PinShotSurfaceView {
     addSeparator()
     addCommand("xmark", "取消截图", "cancel")
     addCommand("square.on.square", "复制截图", "copy")
-
-    let finish = CaptureFinishButton(title: "完成", target: self, action: #selector(commandClicked(_:)))
-    finish.identifier = NSUserInterfaceItemIdentifier("finish")
-    finish.setAccessibilityLabel("完成截图")
-    finish.toolTip = "完成截图（回车）"
-    finish.translatesAutoresizingMaskIntoConstraints = false
-    finish.widthAnchor.constraint(equalToConstant: 58).isActive = true
-    finish.heightAnchor.constraint(equalToConstant: 28).isActive = true
-    stack.addArrangedSubview(finish)
 
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -145,7 +137,6 @@ final class AnnotationToolbarView: PinShotSurfaceView {
     case "ocr": command = .ocr
     case "cancel": command = .cancel
     case "copy": command = .copy
-    case "finish": command = .finish
     default: return
     }
     onCommand?(command)
@@ -160,8 +151,24 @@ private final class ToolbarIconButton: NSButton {
 
   init(symbol: String, label: String) {
     super.init(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
-    image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
-      .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
+    if symbol == "T" {
+      let glyph = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 3, y: 15))
+        path.line(to: NSPoint(x: 15, y: 15))
+        path.move(to: NSPoint(x: 9, y: 15))
+        path.line(to: NSPoint(x: 9, y: 2))
+        path.lineWidth = 1.8
+        NSColor.black.setStroke()
+        path.stroke()
+        return true
+      }
+      glyph.isTemplate = true
+      image = glyph
+    } else {
+      image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+        .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
+    }
     imagePosition = .imageOnly
     imageScaling = .scaleProportionallyDown
     isBordered = false
@@ -207,22 +214,6 @@ private final class ToolbarIconButton: NSButton {
     }
     contentTintColor = swatchColor ?? (selected ? PinShotTheme.accent : .labelColor)
     super.draw(dirtyRect)
-  }
-}
-
-/// Remains a blue primary action even in the nonactivating capture panel.
-private final class CaptureFinishButton: NSButton {
-  override var allowsVibrancy: Bool { false }
-
-  override func draw(_ dirtyRect: NSRect) {
-    (isHighlighted ? PinShotTheme.accent.blended(withFraction: 0.15, of: .black)! : PinShotTheme.accent).setFill()
-    NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white,
-    ]
-    let size = (title as NSString).size(withAttributes: attributes)
-    (title as NSString).draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
-                            withAttributes: attributes)
   }
 }
 
